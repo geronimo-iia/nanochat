@@ -7,7 +7,7 @@ Intended to be run single GPU only atm.
 from nanochat.common import autodetect_device_type, compute_init
 from nanochat.config import Config
 from nanochat.evaluation.engine import Engine
-from nanochat.training.checkpoint import load_model
+from nanochat.training.checkpoint import load_model_from_dir
 
 
 def chat_cli(
@@ -31,7 +31,9 @@ def chat_cli(
     # Init the model and tokenizer
     device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
     _, _, _, _, device = compute_init(device_type)
-    model, tokenizer, _ = load_model(source, device, phase="eval", model_tag=model_tag, step=step)
+    model, tokenizer, _ = load_model_from_dir(
+        base_dir=config.common.base_dir, phase=source, device=device, model_tag=model_tag, step=step
+    )
 
     # Special tokens for the chat state machine
     bos = tokenizer.get_bos_token_id()

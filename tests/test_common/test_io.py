@@ -3,10 +3,7 @@
 import os
 import urllib.request
 
-import pytest
-
 from nanochat.common.io import download_file_with_lock, print0
-
 
 # ---------------------------------------------------------------------------
 # print0
@@ -43,6 +40,7 @@ def test_skips_download_if_file_exists(tmp_path):
         called.append(url)
 
     import urllib.request as ur
+
     original = ur.urlopen
     ur.urlopen = fake_urlopen
     try:
@@ -58,16 +56,18 @@ def test_double_check_inside_lock(tmp_path, monkeypatch):
     """Second rank arriving at the lock finds the file already downloaded."""
     data_dir = tmp_path / "data" / "climbmix"
     data_dir.mkdir(parents=True)
-    target = data_dir / "tok.bin"
-
     download_count = []
 
     class FakeResponse:
         def read(self):
             download_count.append(1)
             return b"content"
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda url: FakeResponse())
 
@@ -85,9 +85,14 @@ def test_lock_file_removed_after_download(tmp_path, monkeypatch):
     data_dir.mkdir(parents=True)
 
     class FakeResponse:
-        def read(self): return b"bytes"
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return b"bytes"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda url: FakeResponse())
 
@@ -102,15 +107,22 @@ def test_postprocess_fn_called(tmp_path, monkeypatch):
     data_dir.mkdir(parents=True)
 
     class FakeResponse:
-        def read(self): return b"raw"
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return b"raw"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda url: FakeResponse())
 
     processed = []
     download_file_with_lock(
-        str(tmp_path), "http://example.com/x.bin", "x.bin",
+        str(tmp_path),
+        "http://example.com/x.bin",
+        "x.bin",
         postprocess_fn=lambda p: processed.append(p),
     )
     assert len(processed) == 1

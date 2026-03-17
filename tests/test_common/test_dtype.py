@@ -1,7 +1,7 @@
 """Tests for compute dtype detection and NANOCHAT_DTYPE override."""
 
-import torch
 import pytest
+import torch
 
 import nanochat.common.dtype as dtype_mod
 

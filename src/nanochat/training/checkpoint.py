@@ -91,7 +91,7 @@ def load_checkpoint(
 
 
 def build_model(
-    checkpoint_dir: str, step: int, device: torch.device, phase: str
+    base_dir: str, checkpoint_dir: str, step: int, device: torch.device, phase: str
 ) -> tuple[GPT, object, dict[str, object]]:
     """
     A bunch of repetitive code to build a model from a given checkpoint.
@@ -100,7 +100,7 @@ def build_model(
     - tokenizer
     - meta data saved during base model training
     """
-    assert phase in ["train", "eval"], f"Invalid phase: {phase}"
+    assert phase in ["base", "train", "eval", "sft"], f"Invalid phase: {phase}"
     model_data, _, meta_data = load_checkpoint(checkpoint_dir, step, device, load_optimizer=False)
     if device.type in {"cpu", "mps"}:
         # Convert bfloat16 tensors to float for CPU inference
@@ -124,7 +124,7 @@ def build_model(
     else:
         model.train()
     # Load the Tokenizer
-    tokenizer = get_tokenizer()
+    tokenizer = get_tokenizer(base_dir=base_dir)
     # Sanity check: compatibility between model and tokenizer
     assert tokenizer.get_vocab_size() == model_config_kwargs["vocab_size"], (
         f"Tokenizer vocab size {tokenizer.get_vocab_size()} does not match model config vocab size {model_config_kwargs['vocab_size']}"
@@ -176,7 +176,7 @@ def load_model_from_dir(
     if step is None:
         step = find_last_step(ckpt_dir)
     log0(f"Loading model from {ckpt_dir} with step {step}")
-    model, tokenizer, meta_data = build_model(ckpt_dir, step, device, phase)
+    model, tokenizer, meta_data = build_model(base_dir, ckpt_dir, step, device, phase)
     return model, tokenizer, meta_data
 
 

@@ -647,7 +647,8 @@ def train_base(config: Config):
                         compression_log = {f"compression/{k}": v for k, v in compression_metrics.items()}
                         wandb_run.log(compression_log)
 
-            wandb_run.log({
+            wandb_run.log(
+                {
                     "step": step,
                     "total_training_flops": flops_so_far,
                     "total_training_time": total_training_time,
@@ -657,7 +658,8 @@ def train_base(config: Config):
                     "train/tok_per_sec": tok_per_sec,
                     "train/mfu": mfu,
                     "train/epoch": epoch,
-                })
+                }
+            )
 
             # state update
             first_step_of_run = (step == 0) or (resuming and step == config.training.resume_from_step)

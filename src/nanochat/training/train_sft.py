@@ -79,9 +79,11 @@ def train_sft(config: Config):
             "WARNING: Flash Attention 3 not available, using PyTorch SDPA fallback. Training will be less efficient."
         )
 
+    # model, tokenizer, meta = load_model("base", torch.device, phase="train", model_tag=args.model_tag, step=args.model_step)
+
     # Load the model and tokenizer
     model, tokenizer, meta = load_model_from_dir(
-        base_dir=base_dir, device=device, phase="train", model_tag=config.sft.model_tag, step=config.sft.model_step
+        base_dir=base_dir, device=device, phase="base", model_tag=config.sft.model_tag, step=config.sft.model_step
     )
 
     # Inherit training hyperparameters from pretrained checkpoint (None = inherit, explicit value = override)
@@ -137,7 +139,7 @@ def train_sft(config: Config):
     if config.sft.load_optimizer:
         optimizer_data = load_optimizer_state(
             base_dir=config.common.base_dir,
-            model_name="base",
+            source="base",
             device=device,
             rank=ddp_rank,
             model_tag=config.sft.model_tag,
@@ -154,7 +156,7 @@ def train_sft(config: Config):
             print0("WARNING: optimizer checkpoint not found, starting with fresh optimizer (slightly worse)")
 
     # GradScaler for fp16 training (bf16/fp32 don't need it)
-    scaler = torch.amp.GradScaler() if get_compute_dtype() == torch.float16 else None
+    scaler = torch.amp.GradScaler(device=device_type) if get_compute_dtype() == torch.float16 else None
     if scaler is not None:
         print0("GradScaler enabled for fp16 training")
 
@@ -171,8 +173,12 @@ def train_sft(config: Config):
         CustomJSON(filepath=identity_conversations_filepath),  # 2 epochs of these
         *[MMLU(subset="auxiliary_train", split="train") for _ in range(config.sft.mmlu_epochs)],  # 100K rows per epoch
         *[GSM8K(subset="main", split="train") for _ in range(config.sft.gsm8k_epochs)],  # 8K rows per epoch
-        SimpleSpelling(size=200000, split="train"),  # 200K rows of Simple Spelling (e.g. spell the word 'apple')
-        SpellingBee(size=80000, split="train"),  # 80K rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
+        SimpleSpelling(
+            base_dir=base_dir, size=200000, split="train"
+        ),  # 200K rows of Simple Spelling (e.g. spell the word 'apple')
+        SpellingBee(
+            base_dir=base_dir, size=80000, split="train"
+        ),  # 80K rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
     ]
     train_dataset = TaskMixture(train_tasks)
     print0(
@@ -400,6 +406,7 @@ def train_sft(config: Config):
                     orig_model,
                     tokenizer,
                     engine,
+                    base_dir=base_dir,
                     batch_size=config.sft.device_batch_size,
                     max_problems=max_problems,
                 )
@@ -512,20 +519,19 @@ def train_sft(config: Config):
         print0(
             f"step {step:05d} ({pct_done:.2f}%) | loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.2f} | epoch: {current_epoch} | total time: {total_training_time / 60:.2f}m"
         )
-        if step % 10 == 0:
-            wandb_run.log(
-                {
-                    "step": step,
-                    "total_training_flops": flops_so_far,
-                    "total_training_time": total_training_time,
-                    "train/loss": debiased_smooth_loss,
-                    "train/lrm": lrm,
-                    "train/dt": dt,
-                    "train/tok_per_sec": tok_per_sec,
-                    "train/mfu": mfu,
-                    "train/epoch": current_epoch,
-                }
-            )
+        wandb_run.log(
+            {
+                "step": step,
+                "total_training_flops": flops_so_far,
+                "total_training_time": total_training_time,
+                "train/loss": debiased_smooth_loss,
+                "train/lrm": lrm,
+                "train/dt": dt,
+                "train/tok_per_sec": tok_per_sec,
+                "train/mfu": mfu,
+                "train/epoch": current_epoch,
+            }
+        )
 
         # The garbage collector spends ~500ms scanning for cycles quite frequently.
         # We manually manage it to avoid these pauses during training.

@@ -1,7 +1,6 @@
 """Tests for nanochat.common.config."""
 
 import tomllib
-from pathlib import Path
 
 import pytest
 
@@ -14,7 +13,6 @@ from nanochat.config import (
     SFTConfig,
     TrainingConfig,
 )
-
 
 # ---------------------------------------------------------------------------
 # Dataclass defaults
@@ -120,7 +118,7 @@ def test_config_generate_default_all_sections():
 
 def test_config_load(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text("[common]\nrun = \"loaded\"\n[training]\ndepth = 7\n", encoding="utf-8")
+    p.write_text('[common]\nrun = "loaded"\n[training]\ndepth = 7\n', encoding="utf-8")
     cfg = Config.load(p)
     assert cfg.common.run == "loaded"
     assert cfg.training.depth == 7
@@ -132,6 +130,7 @@ def test_config_load_unknown_section_raises(tmp_path):
     p.write_text("[bogus]\nfoo = 1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="bogus"):
         Config.load(p)
+
 
 def test_save_roundtrip(tmp_path):
     cfg = Config()
@@ -202,6 +201,7 @@ def test_parse_no_args_uses_defaults(tmp_path):
     assert cfg.training.depth == 20
     assert cfg.common.run == "unnamed"
 
+
 # ---------------------------------------------------------------------------
 # ConfigLoader — TOML only (no CLI overrides)
 # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ def test_parse_no_args_uses_defaults(tmp_path):
 
 def test_parse_toml_common(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text("[common]\nrun = \"from-toml\"\n", encoding="utf-8")
+    p.write_text('[common]\nrun = "from-toml"\n', encoding="utf-8")
     cfg = ConfigLoader().parse(["--config", str(p)])
     assert cfg.common.run == "from-toml"
 
@@ -251,13 +251,13 @@ def test_cli_overrides_toml_training(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text("[training]\ndepth = 12\nnum_iterations = 1000\n", encoding="utf-8")
     cfg = ConfigLoader().add_training().parse(["--config", str(p), "--num-iterations", "500"])
-    assert cfg.training.depth == 12          # TOML, not touched by CLI
+    assert cfg.training.depth == 12  # TOML, not touched by CLI
     assert cfg.training.num_iterations == 500  # CLI wins
 
 
 def test_cli_overrides_toml_common(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text("[common]\nrun = \"toml-run\"\n", encoding="utf-8")
+    p.write_text('[common]\nrun = "toml-run"\n', encoding="utf-8")
     cfg = ConfigLoader().parse(["--config", str(p), "--run", "cli-run"])
     assert cfg.common.run == "cli-run"
 
@@ -276,7 +276,7 @@ def test_toml_beats_dataclass_defaults(tmp_path):
 
 def test_base_dir_autodiscovery(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text("[common]\nrun = \"discovered\"\n[training]\ndepth = 3\n", encoding="utf-8")
+    p.write_text('[common]\nrun = "discovered"\n[training]\ndepth = 3\n', encoding="utf-8")
     cfg = ConfigLoader().add_training().parse(["--base-dir", str(tmp_path)])
     assert cfg.common.run == "discovered"
     assert cfg.training.depth == 3
@@ -285,9 +285,9 @@ def test_base_dir_autodiscovery(tmp_path):
 def test_explicit_config_overrides_base_dir(tmp_path):
     base = tmp_path / "base"
     base.mkdir()
-    (base / "config.toml").write_text("[common]\nrun = \"base\"\n", encoding="utf-8")
+    (base / "config.toml").write_text('[common]\nrun = "base"\n', encoding="utf-8")
     explicit = tmp_path / "explicit.toml"
-    explicit.write_text("[common]\nrun = \"explicit\"\n", encoding="utf-8")
+    explicit.write_text('[common]\nrun = "explicit"\n', encoding="utf-8")
     cfg = ConfigLoader().parse(["--base-dir", str(base), "--config", str(explicit)])
     assert cfg.common.run == "explicit"
 
@@ -300,10 +300,9 @@ def test_base_dir_no_config_toml_uses_defaults(tmp_path):
 
 def test_multiple_sections_raises():
     import pytest
+
     with pytest.raises(RuntimeError, match="one section"):
         ConfigLoader().add_training().add_sft()
-
-
 
 
 def test_unregistered_section_in_toml_ignored(tmp_path):

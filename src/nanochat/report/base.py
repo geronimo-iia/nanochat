@@ -102,7 +102,14 @@ class Report(BaseReport):
             out_file.write("\n")
         return end_time, final_metrics
 
-    def _write_summary(self, out_file: IO[str], final_metrics: dict[str, Any], bloat_data: str, start_time: datetime.datetime | None, end_time: datetime.datetime | None) -> None:
+    def _write_summary(
+        self,
+        out_file: IO[str],
+        final_metrics: dict[str, Any],
+        bloat_data: str,
+        start_time: datetime.datetime | None,
+        end_time: datetime.datetime | None,
+    ) -> None:
         """Write the summary table and wall clock time to out_file."""
         out_file.write("## Summary\n\n")
         out_file.write(bloat_data)

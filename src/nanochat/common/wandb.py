@@ -4,8 +4,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
     from nanochat.config import CommonConfig

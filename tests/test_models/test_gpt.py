@@ -1,5 +1,7 @@
 """Test GPT model."""
+
 import torch
+
 from nanochat.models import GPT, GPTConfig
 
 
@@ -48,7 +50,7 @@ def test_model_initialization():
     )
     model = GPT(config)
     model.init_weights()
-    
+
     # Check weights are initialized (not NaN)
     for param in model.parameters():
         assert not torch.isnan(param).any(), "Model has NaN weights after initialization"
@@ -66,10 +68,10 @@ def test_loss_computation():
     )
     model = GPT(config)
     model.init_weights()
-    
+
     inputs = torch.randint(0, 100, (2, 64))
     targets = torch.randint(0, 100, (2, 64))
-    
+
     loss = model(inputs, targets)
     assert loss.ndim == 0, "Loss should be scalar"
     assert not torch.isnan(loss), "Loss is NaN"

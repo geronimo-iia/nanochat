@@ -19,8 +19,6 @@ from contextlib import contextmanager
 import torch
 import torch.nn.functional as F
 
-from nanochat.common import autodetect_device_type, compute_init
-
 
 # -----------------------------------------------------------------------------
 # Calculator tool helpers

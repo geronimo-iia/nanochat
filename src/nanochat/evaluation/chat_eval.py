@@ -184,6 +184,7 @@ def run_chat_eval(
     model: object,
     tokenizer: object,
     engine: object,
+    base_dir: str,
     batch_size: int = 1,
     num_samples: int = 1,
     max_new_tokens: int = 512,
@@ -198,7 +199,7 @@ def run_chat_eval(
         "ARC-Easy": partial(ARC, subset="ARC-Easy", split="test"),
         "ARC-Challenge": partial(ARC, subset="ARC-Challenge", split="test"),
         "GSM8K": partial(GSM8K, subset="main", split="test"),
-        "SpellingBee": partial(SpellingBee, size=256, split="test"),
+        "SpellingBee": partial(SpellingBee, base_dir=base_dir, size=256, split="test"),
     }[task_name]
     task_object = task_module()
     # Run the evaluation

@@ -1,4 +1,5 @@
 """Tests for GPT model configuration."""
+
 from nanochat.models import GPTConfig
 
 

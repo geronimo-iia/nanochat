@@ -4,17 +4,20 @@ Test Engine class. Example run:
 python -m pytest tests/test_engine.py -v
 """
 
-import torch
-from nanochat.evaluation.engine import KVCache, Engine
 from dataclasses import dataclass
 
+import torch
+
+from nanochat.evaluation.engine import Engine, KVCache
 
 # -----------------------------------------------------------------------------
 # Mock classes for testing Engine without loading a real model
 
+
 @dataclass
 class MockConfig:
     """Minimal config for Engine tests."""
+
     n_kv_head: int = 4
     n_head: int = 4
     n_embd: int = 64
@@ -28,6 +31,7 @@ class MockModel:
     This ensures that with temperature > 0, different samples should
     (with very high probability) produce different tokens.
     """
+
     def __init__(self, vocab_size=262):  # 256 bytes + 6 special tokens
         self.vocab_size = vocab_size
         self.config = MockConfig()
@@ -52,6 +56,7 @@ class ByteTokenizer:
     Simple byte-level tokenizer for testing.
     Tokens 0-255 are raw bytes, 256+ are special tokens.
     """
+
     def __init__(self):
         # Special tokens start at 256
         self._special_tokens = {
@@ -80,6 +85,7 @@ class ByteTokenizer:
         # Filter out special tokens before decoding
         byte_tokens = [t for t in tokens if t < 256]
         return bytes(byte_tokens).decode("utf-8", errors="replace")
+
 
 def test_kv_cache_basic():
     """Test basic KVCache functionality for FA3."""
@@ -130,8 +136,13 @@ def test_kv_cache_prefill():
 
     # Create source cache and advance it
     src_cache = KVCache(
-        batch_size=batch_size, num_heads=num_heads, seq_len=32,
-        head_dim=head_dim, num_layers=num_layers, device="cpu", dtype=torch.float32,
+        batch_size=batch_size,
+        num_heads=num_heads,
+        seq_len=32,
+        head_dim=head_dim,
+        num_layers=num_layers,
+        device="cpu",
+        dtype=torch.float32,
     )
     # Write some data to source cache
     src_cache.k_cache[0, 0, :16, :, :] = 1.0
@@ -140,8 +151,13 @@ def test_kv_cache_prefill():
 
     # Create destination cache with larger seq_len
     dst_cache = KVCache(
-        batch_size=batch_size, num_heads=num_heads, seq_len=64,
-        head_dim=head_dim, num_layers=num_layers, device="cpu", dtype=torch.float32,
+        batch_size=batch_size,
+        num_heads=num_heads,
+        seq_len=64,
+        head_dim=head_dim,
+        num_layers=num_layers,
+        device="cpu",
+        dtype=torch.float32,
     )
 
     # Prefill
@@ -185,7 +201,7 @@ def test_multi_sample_first_token_diversity():
         temperature=1.0,
         seed=42,
     )
-    for token_column, token_masks in gen:
+    for token_column, _ in gen:
         first_tokens = token_column  # This is the first (and only) yield
 
     # With uniform distribution and 16 samples, they should NOT all be identical
@@ -232,7 +248,9 @@ def test_max_tokens_respected():
     for max_tokens in [1, 4, 16, 64]:
         results, _ = engine.generate_batch(prompt, max_tokens=max_tokens)
         num_generated_tokens = len(results[0]) - len(prompt)
-        assert num_generated_tokens <= max_tokens, f"Generated {num_generated_tokens} tokens, expected max_tokens={max_tokens} or less."
+        assert num_generated_tokens <= max_tokens, (
+            f"Generated {num_generated_tokens} tokens, expected max_tokens={max_tokens} or less."
+        )
 
 
 def test_num_samples_count():
@@ -243,7 +261,9 @@ def test_num_samples_count():
 
     for num_samples in [1, 4, 16, 64]:
         results, _ = engine.generate_batch(prompt, num_samples=num_samples, max_tokens=3)
-        assert len(results) == num_samples, f"Expected {num_samples} sequences from {num_samples} samples, got {len(results)}"
+        assert len(results) == num_samples, (
+            f"Expected {num_samples} sequences from {num_samples} samples, got {len(results)}"
+        )
 
 
 def test_different_seeds_introduce_variation_when_temperature_nonzero():

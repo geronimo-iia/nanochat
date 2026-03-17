@@ -2,15 +2,16 @@
 
 import datetime
 import os
+
 import pytest
 
 from nanochat.report.base import BaseReport, Report
-from nanochat.report.utils import slugify, extract, extract_timestamp
-
+from nanochat.report.utils import extract, extract_timestamp, slugify
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def report_dir(tmp_path):
@@ -25,6 +26,7 @@ def report(report_dir):
 # ---------------------------------------------------------------------------
 # BaseReport
 # ---------------------------------------------------------------------------
+
 
 def test_base_report_creates_dir(report_dir):
     BaseReport(report_dir)
@@ -54,6 +56,7 @@ def test_base_report_generate_returns_path(report_dir):
 # ---------------------------------------------------------------------------
 # Report.log
 # ---------------------------------------------------------------------------
+
 
 def test_report_log_creates_file(report):
     path = report.log("Base Model Training", [])
@@ -92,6 +95,7 @@ def test_report_log_float_formatting(report):
 # Report._read_header
 # ---------------------------------------------------------------------------
 
+
 def test_read_header_missing_file(report):
     start_time, bloat_data, content = report._read_header(report.report_dir)
     assert start_time is None
@@ -127,6 +131,7 @@ def test_read_header_returns_content(report):
 # Report._write_summary
 # ---------------------------------------------------------------------------
 
+
 def test_write_summary_table_structure(report, tmp_path):
     out_file = open(tmp_path / "out.md", "w")
     final_metrics = {"base": {"CORE": "0.42"}, "sft": {"CORE": "0.55"}}
@@ -145,7 +150,7 @@ def test_write_summary_core_first(report, tmp_path):
     report._write_summary(out_file, final_metrics, "", None, None)
     out_file.close()
     content = open(tmp_path / "out.md").read()
-    lines = [l for l in content.splitlines() if "CORE" in l or "ARC" in l]
+    lines = [line for line in content.splitlines() if "CORE" in line or "ARC" in line]
     assert lines[0].startswith("| CORE")
     assert lines[-1].startswith("| ChatCORE")
 
@@ -169,6 +174,7 @@ def test_write_summary_unknown_wall_clock(report, tmp_path):
 # ---------------------------------------------------------------------------
 # utils
 # ---------------------------------------------------------------------------
+
 
 def test_slugify():
     assert slugify("Base Model Training") == "base-model-training"

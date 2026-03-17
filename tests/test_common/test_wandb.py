@@ -1,10 +1,9 @@
 """Tests for LocalWandb offline logger and init_wandb helper."""
 
 import json
-import os
 
-from nanochat.config import CommonConfig
 from nanochat.common.wandb import DummyWandb, LocalWandb, init_wandb
+from nanochat.config import CommonConfig
 
 
 def test_creates_output_dir(tmp_path):
@@ -23,8 +22,11 @@ def test_log_writes_jsonl(tmp_path):
 
     lines = (tmp_path / "runs" / "nanochat" / "test-run" / "wandb.jsonl").read_text().splitlines()
     assert len(lines) == 2
-    assert json.loads(lines[0]) == {"step": 0, "loss": 1.5}
-    assert json.loads(lines[1]) == {"step": 1, "loss": 1.2}
+    entry0 = json.loads(lines[0])
+    assert "timestamp" in entry0
+    assert entry0["data"] == {"step": 0, "loss": 1.5}
+    entry1 = json.loads(lines[1])
+    assert entry1["data"] == {"step": 1, "loss": 1.2}
 
 
 def test_finish_closes_file(tmp_path):
