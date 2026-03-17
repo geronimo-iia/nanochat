@@ -109,6 +109,7 @@ Note: `float16` training automatically enables a `GradScaler` in `base_train.py`
 ## Docs
 
 - [docs/guides/quickstart.md](docs/guides/quickstart.md) — first-time setup, data, tokenizer, training
+- [docs/guides/tuning-guide.md](docs/guides/tuning-guide.md) — parameter recommendations for tokenizer, pretraining, and SFT
 - [docs/configuration.md](docs/configuration.md) — config fields, TOML files, CLI overrides
 - [docs/data-layout.md](docs/data-layout.md) — where nanochat stores data, tokenizers, and checkpoints
 - [docs/code-structure.md](docs/code-structure.md) — package map and key cross-package flows

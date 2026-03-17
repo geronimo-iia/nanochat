@@ -8,6 +8,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `docs/guides/tuning-guide.md` — parameter recommendations for tokenizer, pretraining, and SFT across hardware tiers
+- `pyright` `executionEnvironments` in `pyproject.toml` — suppresses `reportMissingParameterType` in `tests/` and `dev/`
+
+### Fixed
+
+- `GradScaler` missing `device=device_type` in `train_sft.py` — was silently disabled on MPS, leaving fp16 gradients unscaled
+- `init_wandb` called with full `Config` instead of `CommonConfig` in `train_sft.py` and `train_rl.py`
+- `load_optimizer_state` called with `model_name=` instead of `source=` in `train_sft.py`
+- `phase="train"` → `phase="base"` when loading pretrained checkpoint in `train_sft.py`
+- `SpellingBee` and `SimpleSpelling` missing `base_dir` parameter — `download_file_with_lock` called without required `base_dir` arg
+- `run_chat_eval` missing `base_dir` for `SpellingBee` instantiation in `chat_eval.py`
+- `chat_cli` missing `base_dir` in `load_model_from_dir` call
+- Unused import `load_model` removed from `train_sft.py`
+
 - Unified `nanochat` CLI — single entry point replacing all per-script entry points
   - `nanochat config init / show`
   - `nanochat data download / tokenizer train / tokenizer eval`

@@ -115,7 +115,7 @@ nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
 ### Multi-GPU run (8× H100, GPT-2 capability)
 
 ```bash
-torchrun --standalone --nproc_per_node=8 -m nanochat.cli train base -- \
+torchrun --standalone --nproc_per_node=8 -m nanochat train base -- \
     --depth=24 \
     --target-param-data-ratio=9.5 \
     --device-batch-size=16 \

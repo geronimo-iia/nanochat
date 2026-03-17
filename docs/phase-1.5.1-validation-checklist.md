@@ -2,13 +2,15 @@
 title: "Phase 1.5.1 Validation Checklist"
 summary: "Step-by-step checklist for running compression metrics validation experiments."
 read_when: "Ready to validate compression metrics with actual training runs."
-status: draft
-last_updated: "2026-06-14"
+status: active
+last_updated: "2026-03-17"
 ---
 
 # Phase 1.5.1 Validation Checklist
 
 **Implementation**: ✅ `CompressionMetrics` class + training loop integration complete  
+**Pipeline smoke test**: ✅ base train → SFT → chat validated end-to-end on MPS (Apple Silicon M3 Max)  
+**Hardware**: MPS only (no multi-GPU) — Experiments 3–4 use single-process with reduced batch size  
 **Next step**: Run Experiment 1 (smoke test), then proceed in order.
 
 ## Pre-Flight
@@ -16,17 +18,17 @@ last_updated: "2026-06-14"
 ### 1. Environment
 
 ```bash
-python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('MPS:', torch.backends.mps.is_available())"
+uv run python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('MPS:', torch.backends.mps.is_available())"
 ```
 
-- CUDA → run all experiments
-- MPS → limited scale only (Experiments 1–2, use small `--device-batch-size`)
+- CUDA → run all experiments with `torchrun` for multi-GPU
+- MPS → all experiments supported, single-process only, use reduced `--device-batch-size`
 - Neither → cannot run validation
 
 ### 2. Data
 
 ```bash
-nanochat data download -n 8    # minimum for d12 smoke test
+uv run nanochat --base-dir $NANOCHAT_BASE_DIR data download -n 8    # minimum for d12 smoke test
 ```
 
 See [data-layout.md](data-layout.md) for where shards are stored.
@@ -34,15 +36,15 @@ See [data-layout.md](data-layout.md) for where shards are stored.
 ### 3. Tokenizer
 
 ```bash
-nanochat data tokenizer train
+uv run nanochat --base-dir $NANOCHAT_BASE_DIR data tokenizer train
 ```
 
 ### 4. Code
 
 ```bash
-python -c "from nanochat.compression_metrics import CompressionMetrics; print('OK')"
+uv run python -c "from nanochat.compression_metrics import CompressionMetrics; print('OK')"
 uv run pytest tests/ -q
-# Expected: 165 passed, 10 skipped
+# Expected: 165 passed, 10 skipped (FA3 tests skipped on MPS/CPU)
 ```
 
 ## Experiments
@@ -54,7 +56,7 @@ Run in order. Each builds confidence before committing more compute.
 Verify compression tracking works end-to-end without errors.
 
 ```bash
-nanochat train base \
+uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
     --depth=8 \
     --num-iterations=100 \
     --track-compression \
@@ -63,7 +65,6 @@ nanochat train base \
     --core-metric-every=-1 \
     --sample-every=-1 \
     --save-every=-1 \
-    --wandb=disabled \
     --run=compression-smoke-d8
 ```
 
@@ -76,7 +77,7 @@ nanochat train base \
 Collect enough data points to analyze correlation.
 
 ```bash
-nanochat train base \
+uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
     --depth=12 \
     --track-compression \
     --compression-log-every=50 \
@@ -91,14 +92,14 @@ nanochat train base \
 - [ ] Multiple val checkpoints logged (every 250 steps)
 - [ ] Can plot `compression_ratio` vs `val_bpb` over time
 
-### Experiment 3 — Medium Scale (d16, ~4–6h on GPU)
+### Experiment 3 — Medium Scale (d16, ~12–18h on MPS / ~2h on GPU)
 
 Validate correlation holds at larger scale.
 
 ```bash
-# Multi-GPU
-torchrun --standalone --nproc_per_node=8 -m nanochat.cli train base -- \
+uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
     --depth=16 \
+    --device-batch-size=8 \
     --track-compression \
     --compression-log-every=100 \
     --eval-every=500 \
@@ -106,21 +107,19 @@ torchrun --standalone --nproc_per_node=8 -m nanochat.cli train base -- \
     --sample-every=-1 \
     --save-every=-1 \
     --run=compression-validation-d16
-
-# Single GPU: replace torchrun with: nanochat train base
 ```
 
 - [ ] Completes without error
 - [ ] Correlation pattern consistent with Experiment 2
 
-### Experiment 4 — Full Scale (d24, ~8–12h on GPU)
+### Experiment 4 — Full Scale (d24, ~48h+ on MPS / ~8–12h on GPU)
 
-Final validation at production scale.
+Final validation at production scale. On MPS this is a long run — consider running overnight in a `screen` session.
 
 ```bash
-torchrun --standalone --nproc_per_node=8 -m nanochat.cli train base -- \
+uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
     --depth=24 \
-    --device-batch-size=16 \
+    --device-batch-size=4 \
     --track-compression \
     --compression-log-every=100 \
     --eval-every=500 \
