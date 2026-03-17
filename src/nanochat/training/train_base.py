@@ -107,7 +107,7 @@ def train_base(config: Config):
     # wandb logging init
     user_config = asdict(config)  # for logging
     master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
-    wandb_run = init_wandb(config, master_process=master_process, user_config=user_config)
+    wandb_run = init_wandb(config.common, master_process=master_process, user_config=user_config)
 
     # Flash Attention status
     if _use_fa3():
@@ -317,7 +317,7 @@ def train_base(config: Config):
 
     # -----------------------------------------------------------------------------
     # GradScaler for fp16 training (bf16/fp32 don't need it — bf16 has the same exponent range as fp32)
-    scaler = torch.amp.GradScaler() if get_compute_dtype() == torch.float16 else None
+    scaler = torch.amp.GradScaler(device=device_type) if get_compute_dtype() == torch.float16 else None
     if scaler is not None:
         print0("GradScaler enabled for fp16 training")
 
@@ -328,6 +328,7 @@ def train_base(config: Config):
         assert meta_data is not None
         dataloader_resume_state_dict = meta_data["dataloader_state_dict"]
     train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
+        base_dir,
         tokenizer,
         config.training.device_batch_size,
         config.training.max_seq_len,
@@ -336,7 +337,7 @@ def train_base(config: Config):
         resume_state_dict=dataloader_resume_state_dict,
     )
     build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
-        tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
+        base_dir, tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
     )
 
     # -----------------------------------------------------------------------------
@@ -600,10 +601,10 @@ def train_base(config: Config):
             tok_per_sec = int(total_batch_size / dt)
             flops_per_sec = num_flops_per_token * total_batch_size / dt
             mfu = 100 * flops_per_sec / (gpu_peak_flops * ddp_world_size)
-            if step > 10:
+            if step > 0:
                 total_training_time += dt  # only count the time after the first 10 steps
             # Calculate ETA based on average time per step (excluding first 10 steps)
-            steps_done = step - 10
+            steps_done = step - 1
             if steps_done > 0:
                 avg_time_per_step = total_training_time / steps_done
                 remaining_steps = num_iterations - step
@@ -643,11 +644,10 @@ def train_base(config: Config):
 
                     # Log compression metrics to wandb
                     if master_process:
-                        compression_log = {f"compression/{k}": v for k, v in compression_metrics.items() if k != "step"}
+                        compression_log = {f"compression/{k}": v for k, v in compression_metrics.items()}
                         wandb_run.log(compression_log)
 
-            if step % 100 == 0:
-                log_data = {
+            wandb_run.log({
                     "step": step,
                     "total_training_flops": flops_so_far,
                     "total_training_time": total_training_time,
@@ -657,8 +657,7 @@ def train_base(config: Config):
                     "train/tok_per_sec": tok_per_sec,
                     "train/mfu": mfu,
                     "train/epoch": epoch,
-                }
-                wandb_run.log(log_data)
+                })
 
             # state update
             first_step_of_run = (step == 0) or (resuming and step == config.training.resume_from_step)

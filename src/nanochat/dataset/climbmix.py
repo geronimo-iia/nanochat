@@ -21,6 +21,19 @@ MAX_SHARD = 6542  # the last datashard is shard_06542.parquet
 index_to_filename = lambda index: f"shard_{index:05d}.parquet"  # format of the filenames
 
 
+def _download_shard(args: tuple[str, str, int]) -> bool:
+    """Module-level worker for multiprocessing — downloads a single shard.
+    This is the function that gets called in parallel across multiple processes,
+    so it needs to be defined at the module level (not nested inside another function).
+    It takes a tuple of arguments (data_dir, base_url, index), constructs the filename and URL,
+    and calls the download function.
+    It returns True if the download was successful, False otherwise.
+    """
+    data_dir, base_url, index = args
+    filename = index_to_filename(index)
+    return download_single_file(data_dir, f"{base_url}/{filename}", filename)
+
+
 def climbmix_download(cfg: Config, num_files: int = -1, num_workers: int = 4) -> None:
     """Download dataset shards to the configured base directory.
 
@@ -45,12 +58,9 @@ def climbmix_download(cfg: Config, num_files: int = -1, num_workers: int = 4) ->
     print(f"Target directory: {data_dir}")
     print()
 
-    def download_wrapper(index: int):
-        filename = index_to_filename(index)
-        return download_single_file(data_dir, f"{BASE_URL}/{filename}", filename)
-
+    worker_args = [(str(data_dir), BASE_URL, i) for i in ids_to_download]
     with Pool(processes=num_workers) as pool:
-        results = pool.map(download_wrapper, ids_to_download)
+        results = pool.map(_download_shard, worker_args)
 
     # Report results
     successful = sum(1 for success in results if success)

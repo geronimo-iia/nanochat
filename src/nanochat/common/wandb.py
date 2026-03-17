@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 from typing import TYPE_CHECKING, Union
@@ -34,7 +35,7 @@ class LocalWandb(DummyWandb):
         self._f = open(log_dir / "wandb.jsonl", "a")
 
     def log(self, data: dict[str, Any], *args: object, **kwargs: object) -> None:
-        self._f.write(json.dumps(data) + "\n")
+        self._f.write(json.dumps({"timestamp": time.time(), "data": data}) + "\n")
         self._f.flush()
 
     def finish(self):

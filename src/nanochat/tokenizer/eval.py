@@ -41,8 +41,8 @@ def _print_comparison(
     """Print comparison table between baseline tokenizer and ours."""
     print(f"\nComparison with {baseline_name}:")
     print("=" * 95)
-    print(f"{'Text Type':<10} {'Bytes':<8} {baseline_name:<15} {'Ours':<15} {'Relative':<12} {'Better':<10}")
-    print(f"{'':10} {'':8} {'Tokens':<7} {'Ratio':<7} {'Tokens':<7} {'Ratio':<7} {'Diff %':<12}")
+    print(f"{'Text Type':<10} {'Bytes':<8} {baseline_name:<15} {'Ours':<15} {'Token':<12} {'Better':<10}")
+    print(f"{'':10} {'':8} {'Tokens':<7} {'Ratio':<7} {'Tokens':<7} {'Ratio':<7} {'Reduction':<12}")
     print("-" * 95)
 
     for name, _ in all_text:
@@ -138,7 +138,7 @@ def tokenizer_eval(config: Config) -> None:
             + baseline_name
             + " Tokens | "
             + baseline_name
-            + " Ratio | Ours Tokens | Ours Ratio | Relative Diff % |"
+            + " Ratio | Ours Tokens | Ours Ratio | Token Reduction |"
         )
         lines.append("|-----------|-------|--------------|--------------|-------------|------------|-----------------|")
         for name, text in all_text:
