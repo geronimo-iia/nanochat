@@ -57,4 +57,4 @@ Sequencing depends on the Phase 1.5 outcome.
 ## Deferred
 
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
-- **MPS fp16 gradient stability** — `GradScaler` silently disables on MPS; unknown whether fp16 is stable without it. Needs a d8 comparison run: fp16 vs fp32 loss curves.
+- **MPS fp16 vs fp32 loss curves** — `GradScaler(device='mps')` works natively on Apple Silicon. A d8 comparison run (fp16 vs fp32) would confirm whether fp16 training is numerically stable in practice.
