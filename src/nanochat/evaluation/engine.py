@@ -20,7 +20,6 @@ import torch
 import torch.nn.functional as F
 
 from nanochat.common import autodetect_device_type, compute_init
-from nanochat.training.checkpoint import load_model
 
 
 # -----------------------------------------------------------------------------
@@ -111,7 +110,16 @@ class KVCache:
     - Position tracked per batch element via cache_seqlens tensor
     """
 
-    def __init__(self, batch_size: int, num_heads: int, seq_len: int, head_dim: int, num_layers: int, device: torch.device, dtype: torch.dtype) -> None:
+    def __init__(
+        self,
+        batch_size: int,
+        num_heads: int,
+        seq_len: int,
+        head_dim: int,
+        num_layers: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> None:
         self.batch_size = batch_size
         self.max_seq_len = seq_len
         self.n_layers = num_layers
@@ -155,7 +163,9 @@ class KVCache:
 
 # -----------------------------------------------------------------------------
 @torch.inference_mode()
-def sample_next_token(logits: torch.Tensor, rng: torch.Generator, temperature: float = 1.0, top_k: int | None = None) -> torch.Tensor:
+def sample_next_token(
+    logits: torch.Tensor, rng: torch.Generator, temperature: float = 1.0, top_k: int | None = None
+) -> torch.Tensor:
     """Sample a single next token from given logits of shape (B, vocab_size). Returns (B, 1)."""
     assert temperature >= 0.0, "temperature must be non-negative"
     if temperature == 0.0:
@@ -192,7 +202,15 @@ class Engine:
         self.tokenizer = tokenizer  # needed for tool use
 
     @torch.inference_mode()
-    def generate(self, tokens: list[int], num_samples: int = 1, max_tokens: int | None = None, temperature: float = 1.0, top_k: int | None = None, seed: int = 42):
+    def generate(
+        self,
+        tokens: list[int],
+        num_samples: int = 1,
+        max_tokens: int | None = None,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        seed: int = 42,
+    ):
         """Same as generate, but does single prefill and then clones the KV cache."""
         assert isinstance(tokens, list) and isinstance(tokens[0], int), "expecting list of ints"
         device = self.model.get_device()
@@ -294,7 +312,9 @@ class Engine:
             ids = torch.tensor(token_column, dtype=torch.long, device=device).unsqueeze(1)
             logits = self.model.forward(ids, kv_cache=kv_cache_decode)[:, -1, :]  # (B, vocab_size)
 
-    def generate_batch(self, tokens: list[int], num_samples: int = 1, **kwargs: object) -> tuple[list[list[int]], list[list[int]]]:
+    def generate_batch(
+        self, tokens: list[int], num_samples: int = 1, **kwargs: object
+    ) -> tuple[list[list[int]], list[list[int]]]:
         """
         Non-streaming batch generation that just returns the final token sequences.
         Returns a list of token sequences (list of lists of ints).
@@ -317,57 +337,3 @@ class Engine:
             if all(completed):
                 break
         return results, masks
-
-
-if __name__ == "__main__":
-    """
-    Quick inline test to make sure that the naive/slow model.generate function
-    is equivalent to the faster Engine.generate function here.
-    """
-    import time
-
-    # init compute
-    device_type = autodetect_device_type()
-    ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
-    # load the model and tokenizer
-    model, tokenizer, meta = load_model("base", device, phase="eval")
-    bos_token_id = tokenizer.get_bos_token_id()
-    # common hyperparameters
-    kwargs = dict(max_tokens=64, temperature=0.0)
-    # set the starting prompt
-    prompt_tokens = tokenizer.encode("The chemical formula of water is", prepend=bos_token_id)
-    # generate the reference sequence using the model.generate() function
-    generated_tokens = []
-    torch.cuda.synchronize()
-    t0 = time.time()
-    stream = model.generate(prompt_tokens, **kwargs)
-    for token in stream:
-        generated_tokens.append(token)
-        chunk = tokenizer.decode([token])
-        print(chunk, end="", flush=True)
-    print()
-    torch.cuda.synchronize()
-    t1 = time.time()
-    print(f"Reference time: {t1 - t0:.2f}s")
-    reference_ids = generated_tokens
-    # generate tokens with Engine
-    generated_tokens = []
-    engine = Engine(model, tokenizer)
-    stream = engine.generate(prompt_tokens, num_samples=1, **kwargs)  # note: runs in fp32
-    torch.cuda.synchronize()
-    t0 = time.time()
-    for token_column, token_masks in stream:
-        token = token_column[0]  # only print out the first row
-        generated_tokens.append(token)
-        chunk = tokenizer.decode([token])
-        print(chunk, end="", flush=True)
-    print()
-    torch.cuda.synchronize()
-    t1 = time.time()
-    print(f"Engine time: {t1 - t0:.2f}s")
-    # compare the two sequences
-    for i in range(len(reference_ids)):
-        if reference_ids[i] != generated_tokens[i]:
-            print(f"Mismatch at {i}: {reference_ids[i]} != {generated_tokens[i]}")
-            break
-    print(f"Match: {reference_ids == generated_tokens}")
