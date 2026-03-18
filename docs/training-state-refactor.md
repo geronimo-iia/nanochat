@@ -1,135 +1,203 @@
 ---
 title: "TrainingState Refactor Plan"
-summary: "Plan to extract mutable training loop variables into a TrainingState dataclass, eliminating the train_base_model closure."
+summary: "Plan to extract mutable loop state into dataclasses across all training and evaluation entry points."
 read_when:
-  - Implementing or reviewing the TrainingState refactor in base_train.py
-  - Understanding why train_base_model was converted from a closure to a plain function
+  - Implementing or reviewing the TrainingState refactor
+  - Understanding the mutable state pattern across train_base, train_sft, train_rl, base_eval, chat_eval
 status: draft
 last_updated: "2025-07-14"
 ---
 
 # TrainingState Refactor Plan
 
-Goal: eliminate the `train_base_model()` closure in `base_train.py` by bundling all mutable
-loop state into a `TrainingState` dataclass. The closure exists solely to avoid passing ~20
-captured variables as arguments — removing it makes state explicit, resumable, and testable.
+Goal: extract mutable loop variables into explicit dataclasses across all entry points.
+Currently every training/eval function scatters state as bare local variables — this makes
+resumption fragile, testing hard, and the dual-trainer refactor impossible.
 
 ---
 
-## Step 1 — Create `training/train_state.py`
+## Current state inventory
 
-Define `TrainingState` with all mutable loop variables:
+Each entry point has its own set of mutable loop variables:
+
+### train_base.py — `train_base_model()` closure
+
+| Variable | Type | Checkpoint? |
+|---|---|---|
+| `step` | int | ✅ `meta_data["step"]` |
+| `val_bpb` | float \| None | ✅ `meta_data["val_bpb"]` |
+| `min_val_bpb` | float | ✅ `loop_state["min_val_bpb"]` |
+| `smooth_train_loss` | float | ✅ `loop_state["smooth_train_loss"]` |
+| `total_training_time` | float | ✅ `loop_state["total_training_time"]` |
+| `dataloader_state_dict` | dict \| None | ✅ `meta_data["dataloader_state_dict"]` |
+
+### train_sft.py — flat locals
+
+| Variable | Type | Checkpoint? |
+|---|---|---|
+| `step` | int | ❌ |
+| `val_bpb` | float \| None | ❌ |
+| `min_val_bpb` | float | ❌ |
+| `smooth_train_loss` | float | ❌ |
+| `total_training_time` | float | ❌ |
+| `last_step` | bool | ❌ |
+| `approx_progress` | float | ❌ |
+| `current_epoch` | int | ❌ |
+| `progress` | float | ❌ |
+
+### train_rl.py — flat locals
+
+| Variable | Type | Checkpoint? |
+|---|---|---|
+| `step` | int (loop var) | ❌ |
+| `rewards_list` | list[float] | ❌ |
+| `sequence_lengths` | list[int] | ❌ |
+
+### base_eval.py — flat locals
+
+| Variable | Type |
+|---|---|
+| `core_results` | dict \| None |
+| `bpb_results` | dict |
+| `samples` | list[str] |
+| `unconditioned_samples` | list[str] |
+
+### chat_eval.py — flat locals
+
+| Variable | Type |
+|---|---|
+| `results` | dict[str, float] |
+
+---
+
+## Step 1 — Create state dataclasses in `training/train_state.py`
+
+### BaseTrainingState
+
+Shared fields across base and SFT training:
 
 ```python
 @dataclass
-class TrainingState:
+class BaseTrainingState:
     step: int
     val_bpb: float | None
     min_val_bpb: float
     smooth_train_loss: float
     total_training_time: float
+
+    @classmethod
+    def fresh(cls) -> Self: ...
+
+    def to_checkpoint(self) -> dict: ...
+
+    @classmethod
+    def from_checkpoint(cls, meta_data: dict) -> Self: ...
+```
+
+### PretrainingState
+
+Extends base with checkpoint-resumable dataloader state:
+
+```python
+@dataclass
+class PretrainingState(BaseTrainingState):
     dataloader_state_dict: dict | None
 ```
 
-Add two constructors:
+### SFTState
 
-- `TrainingState.fresh()` — zero-initialised state for a new run
-- `TrainingState.from_checkpoint(meta_data)` — restores state from checkpoint `meta_data` dict
-
-`from_checkpoint` reads:
-- `meta_data["step"]`
-- `meta_data["val_bpb"]`
-- `meta_data["loop_state"]["min_val_bpb"]`
-- `meta_data["loop_state"]["smooth_train_loss"]`
-- `meta_data["loop_state"]["total_training_time"]`
-- `meta_data["dataloader_state_dict"]`
-
----
-
-## Step 2 — Update `base_train.py`
-
-### 2a. Import and construct state
-
-Replace the `if resuming / else` state init block:
+Extends base with SFT-specific progress tracking:
 
 ```python
-# before
-if not resuming:
-    step = 0
-    val_bpb = None
-    ...
-else:
-    step = meta_data["step"]
-    loop_state = cast(...)
-    ...
-
-# after
-state = TrainingState.fresh() if not resuming else TrainingState.from_checkpoint(meta_data)
+@dataclass
+class SFTState(BaseTrainingState):
+    last_step: bool
+    approx_progress: float
+    current_epoch: int
+    progress: float
 ```
 
-### 2b. Replace bare variable access with `state.*`
+### RLState
 
-All reads/writes of `step`, `val_bpb`, `min_val_bpb`, `smooth_train_loss`,
-`total_training_time`, `dataloader_state_dict` become `state.*` throughout the loop.
-
-### 2c. Replace `loop_state` dict in `save_checkpoint`
+Minimal — RL doesn't checkpoint loop state:
 
 ```python
-# before
-"loop_state": {
-    "min_val_bpb": min_val_bpb,
-    "smooth_train_loss": smooth_train_loss,
-    "total_training_time": total_training_time,
-},
-
-# after
-"loop_state": {
-    "min_val_bpb": state.min_val_bpb,
-    "smooth_train_loss": state.smooth_train_loss,
-    "total_training_time": state.total_training_time,
-},
-```
-
-### 2d. Promote `train_base_model` to module-level function
-
-Remove the closure. Make it a plain `def train_base_model(state, ...)` with explicit
-parameters for everything it previously captured:
-
-```python
-def train_base_model(
-    state: TrainingState,
-    config: Config,
-    model,
-    orig_model,
-    optimizer,
-    scaler,
-    train_loader,
-    build_val_loader,
-    token_bytes,
-    tokenizer,
-    device,
-    device_type,
-    ...
-) -> None:
-```
-
-Call site in `base_train` becomes:
-
-```python
-train_base_model(state=state, config=config, model=model, ...)
+@dataclass
+class RLState:
+    step: int
 ```
 
 ---
 
-## Step 3 — Verify checkpoint round-trip
+## Step 2 — Create eval result dataclasses in `evaluation/eval_state.py`
 
-Confirm `TrainingState.from_checkpoint` reads exactly the keys that `save_checkpoint`
-writes. The keys to verify:
+### BaseEvalResult
 
-| `from_checkpoint` reads | `save_checkpoint` writes |
+```python
+@dataclass
+class BaseEvalResult:
+    core_results: dict | None = None
+    bpb_results: dict = field(default_factory=dict)
+    samples: list[str] = field(default_factory=list)
+    unconditioned_samples: list[str] = field(default_factory=list)
+```
+
+### ChatEvalResult
+
+```python
+@dataclass
+class ChatEvalResult:
+    results: dict[str, float] = field(default_factory=dict)
+    chatcore: float | None = None
+```
+
+---
+
+## Step 3 — Update entry points
+
+### 3a. train_base.py
+
+- Import `PretrainingState`
+- Replace `if resuming / else` block with `PretrainingState.fresh()` / `.from_checkpoint()`
+- Replace bare variable access with `state.*`
+- Replace `loop_state` dict in `save_checkpoint` with `state.to_checkpoint()`
+- Eliminate the `train_base_model()` closure — promote to module-level function
+
+### 3b. train_sft.py
+
+- Import `SFTState`
+- Replace scattered locals with `state.*`
+- The `nonlocal last_step, approx_progress, current_epoch` in the data generator
+  becomes reads/writes on `state.*` (pass state to the generator)
+
+### 3c. train_rl.py
+
+- Import `RLState`
+- Minimal change — just wrap `step` in the dataclass for consistency
+
+### 3d. base_eval.py
+
+- Import `BaseEvalResult`
+- Replace scattered result locals with `result.*`
+- Return `BaseEvalResult` instead of logging inline
+
+### 3e. chat_eval.py
+
+- Import `ChatEvalResult`
+- Replace `results` dict with `result.*`
+- Return `ChatEvalResult` instead of logging inline
+
+---
+
+## Step 4 — Verify checkpoint round-trip (base training)
+
+Confirm `PretrainingState.from_checkpoint` reads exactly the keys that
+`state.to_checkpoint()` writes:
+
+| `from_checkpoint` reads | `to_checkpoint` writes |
 |---|---|
-| `meta_data["step"]` | `"step": step` |
-| `meta_data["val_bpb"]` | `"val_bpb": val_bpb` |
+| `meta_data["step"]` | `"step": state.step` |
+| `meta_data["val_bpb"]` | `"val_bpb": state.val_bpb` |
 | `meta_data["loop_state"]["min_val_bpb"]` | `"loop_state": {"min_val_bpb": ...}` |
 | `meta_data["loop_state"]["smooth_train_loss"]` | `"loop_state": {"smooth_train_loss": ...}` |
 | `meta_data["loop_state"]["total_training_time"]` | `"loop_state": {"total_training_time": ...}` |
@@ -137,9 +205,25 @@ writes. The keys to verify:
 
 ---
 
+## Implementation order
+
+1. `training/train_state.py` — all training state dataclasses
+2. `evaluation/eval_state.py` — all eval result dataclasses
+3. `train_base.py` — highest value (closure elimination + checkpoint resumption)
+4. `train_sft.py` — second highest (eliminates `nonlocal` hack in data generator)
+5. `base_eval.py` + `chat_eval.py` — clean up eval result passing
+6. `train_rl.py` — minimal, for consistency
+
+---
+
 ## Files touched
 
 | File | Change |
 |---|---|
-| `src/nanochat/training/train_state.py` | New file — `TrainingState` dataclass |
-| `src/nanochat/training/base_train.py` | Import `TrainingState`, replace init block, replace bare vars, promote closure |
+| `src/nanochat/training/train_state.py` | New — `PretrainingState`, `SFTState`, `RLState` |
+| `src/nanochat/evaluation/eval_state.py` | New — `BaseEvalResult`, `ChatEvalResult` |
+| `src/nanochat/training/train_base.py` | Use `PretrainingState`, eliminate closure |
+| `src/nanochat/training/train_sft.py` | Use `SFTState`, eliminate `nonlocal` |
+| `src/nanochat/training/train_rl.py` | Use `RLState` |
+| `src/nanochat/evaluation/base_eval.py` | Use `BaseEvalResult` |
+| `src/nanochat/evaluation/chat_eval.py` | Use `ChatEvalResult` |
