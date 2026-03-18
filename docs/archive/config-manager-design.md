@@ -121,31 +121,15 @@ def get_tokenizer() -> RustBPETokenizer:
 - Initialized in CLI entry point via `load_and_init`
 - Existing function signatures unchanged
 
-### Phase 2 — Migrate functions that receive `config` just to pass it through
+### Phase 2 — Migrate functions that receive `config` just to pass it through ✅
 
-Functions that accept `Config` or `CommonConfig` only to forward it:
+`init_wandb` no longer receives `CommonConfig` — reads from `current.get().common` internally.
 
-| Module | Functions |
-|---|---|
-| `common/wandb.py` | `init_wandb` (receives `CommonConfig`) |
+### Phase 3 — Clean up entry points ✅
 
-### Phase 3 — Clean up entry points
-
-Training/eval entry points still receive `config` as an explicit parameter (clarity at
-the top level), but stop extracting config sections just to pass them down:
-
-```python
-# Before
-def train_base(config: Config):
-    wandb_run = init_wandb(config.common, ...)
-
-# After
-def train_base(config: Config):
-    wandb_run = init_wandb(...)
-```
-
-Note: `base_dir` parameter elimination is handled by the [workspace module](workspace-design.md),
-not by the config manager.
+Absorbed into Phase 2 — entry points (`train_base`, `train_sft`, `train_rl`) no longer
+extract `config.common` to pass it down. `init_wandb` is the only function that was
+threading `CommonConfig`, and it was migrated in Phase 2.
 
 ---
 

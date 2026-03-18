@@ -76,7 +76,7 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark, allowing the GPU to use more unified memory before falling back to CPU. Tested on d6 (10 steps): no measurable throughput improvement (~55,900–58,300 tok/sec vs baseline — but those numbers were with compile/NaN, so inconclusive). May help at larger depths where memory pressure is real.
 
-- **Config manager** ✅ — `config/current.py` and `load_and_init` implemented. See [design](config-manager-design.md).
+- **Config manager** ✅ — `config/current.py` and `load_and_init` implemented. See [design](archive/config-manager-design.md).
 - **Workspace module** ✅ Phase 1 — `workspace.py` implemented alongside `common/paths.py`. See [design](workspace-design.md).
 - **Scheduler placement** ✅ — schedulers co-located in training scripts, `schedulers.py` deleted. See [study](archive/scheduler-placement-study.md).
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).

@@ -12,7 +12,7 @@ last_updated: "2025-07-15"
 # Workspace Design
 
 Goal: evolve `common/paths.py` into a module-level workspace store that reads `base_dir`
-from the [config manager](config-manager-design.md) instead of taking it as a parameter.
+from the [config manager](archive/config-manager-design.md) instead of taking it as a parameter.
 
 ---
 
@@ -139,11 +139,11 @@ def get_tokenizer() -> RustBPETokenizer:
 
 Functions that only need a path and currently take `base_dir`:
 
-| Module | Functions |
-|---|---|
-| `tokenizer/utils.py` | `get_tokenizer`, `get_token_bytes` |
-| `dataset/utils.py` | `list_parquet_files`, `parquets_iter_batched` |
-| `report/` | `get_report` |
+| Module               | Functions                                     |
+| -------------------- | --------------------------------------------- |
+| `tokenizer/utils.py` | `get_tokenizer`, `get_token_bytes`            |
+| `dataset/utils.py`   | `list_parquet_files`, `parquets_iter_batched` |
+| `report/`            | `get_report`                                  |
 
 Remove `base_dir` parameter, use `workspace.*()` internally.
 
@@ -151,12 +151,12 @@ Remove `base_dir` parameter, use `workspace.*()` internally.
 
 Functions that pass `base_dir` through to leaf functions:
 
-| Module | Functions |
-|---|---|
-| `training/checkpoint.py` | `load_model_from_dir`, `build_model`, `load_optimizer_state` |
-| `training/dataloader.py` | data loader constructors |
-| `evaluation/core_benchmark.py` | `evaluate_core` |
-| `tasks/spellingbee.py` | `SpellingBee.__init__`, `SimpleSpelling.__init__` |
+| Module                         | Functions                                                    |
+| ------------------------------ | ------------------------------------------------------------ |
+| `training/checkpoint.py`       | `load_model_from_dir`, `build_model`, `load_optimizer_state` |
+| `training/dataloader.py`       | data loader constructors                                     |
+| `evaluation/core_benchmark.py` | `evaluate_core`                                              |
+| `tasks/spellingbee.py`         | `SpellingBee.__init__`, `SimpleSpelling.__init__`            |
 
 ### Phase 4 — Clean up entry points and remove `common/paths.py`
 
@@ -209,20 +209,20 @@ def test_checkpoint_dir(tmp_path):
 
 ## Tradeoffs
 
-| | Explicit `base_dir` param (current) | Module-level workspace (proposed) |
-|---|---|---|
-| **Clarity** | Every function declares its dependency | Hidden dependency on module state |
-| **Testability** | Easy to pass test values | Requires `reset()` fixture |
-| **Boilerplate** | `base_dir=` threaded through 20+ functions | One `init()` call |
-| **Upstream sync** | Upstream also threads `base_dir` everywhere | Diverges from upstream pattern |
-| **Refactoring** | Adding a new path means updating all callers | Just add a function to workspace |
-| **Complexity** | None | One module, one private variable |
+|                   | Explicit `base_dir` param (current)          | Module-level workspace (proposed) |
+| ----------------- | -------------------------------------------- | --------------------------------- |
+| **Clarity**       | Every function declares its dependency       | Hidden dependency on module state |
+| **Testability**   | Easy to pass test values                     | Requires `reset()` fixture        |
+| **Boilerplate**   | `base_dir=` threaded through 20+ functions   | One `init()` call                 |
+| **Upstream sync** | Upstream also threads `base_dir` everywhere  | Diverges from upstream pattern    |
+| **Refactoring**   | Adding a new path means updating all callers | Just add a function to workspace  |
+| **Complexity**    | None                                         | One module, one private variable  |
 
 ---
 
 ## Dependencies
 
-- Requires [config manager](config-manager-design.md) (reads `base_dir` from config)
+- Requires [config manager](archive/config-manager-design.md) (reads `base_dir` from config)
 - Replaces `common/paths.py` (same functions, no `base_dir` param)
 - Simplifies the [checkpoint manager](checkpoint-manager-design.md) (no `base_dir` threading)
 - Simplifies the [dual-trainer architecture](dual-trainer-architecture.md)

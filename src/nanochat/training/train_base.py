@@ -157,7 +157,7 @@ def train_base(config: Config):
     # wandb logging init
     user_config = asdict(config)  # for logging
     master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
-    wandb_run = init_wandb(config.common, master_process=master_process, user_config=user_config)
+    wandb_run = init_wandb(user_config=user_config, master_process=master_process)
 
     # Flash Attention status
     if _use_fa3():

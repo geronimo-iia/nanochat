@@ -95,7 +95,7 @@ def train_sft(config: Config):
 
     # wandb logging init
     master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
-    wandb_run = init_wandb(config.common, master_process=master_process, project_suffix="sft", user_config=user_config)
+    wandb_run = init_wandb(user_config=user_config, master_process=master_process, project_suffix="sft")
 
     # Flash Attention status
     if not HAS_FA3:

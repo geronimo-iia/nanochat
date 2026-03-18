@@ -2,8 +2,22 @@
 
 import json
 
+import pytest
+
 from nanochat.common.wandb import DummyWandb, LocalWandb, init_wandb
-from nanochat.config import CommonConfig
+from nanochat.config import Config, reset_config, init_config
+from nanochat.config.common import CommonConfig
+
+
+@pytest.fixture(autouse=True)
+def reset():
+    reset_config()
+    yield
+    reset_config()
+
+
+def _init(tmp_path, *, run="my-run", wandb="disabled"):
+    init_config(Config(common=CommonConfig(run=run, wandb=wandb, base_dir=str(tmp_path))))
 
 
 def test_creates_output_dir(tmp_path):
@@ -41,14 +55,14 @@ def test_finish_closes_file(tmp_path):
 
 
 def test_init_wandb_disabled(tmp_path):
-    cfg = CommonConfig(run="my-run", wandb="disabled", base_dir=str(tmp_path))
-    w = init_wandb(cfg, {}, master_process=True)
+    _init(tmp_path, wandb="disabled")
+    w = init_wandb({}, master_process=True)
     assert isinstance(w, DummyWandb)
 
 
 def test_init_wandb_local(tmp_path):
-    cfg = CommonConfig(run="my-run", wandb="local", base_dir=str(tmp_path))
-    w = init_wandb(cfg, {}, master_process=True)
+    _init(tmp_path, wandb="local")
+    w = init_wandb({}, master_process=True)
     assert isinstance(w, LocalWandb)
     w.finish()
 
@@ -56,21 +70,21 @@ def test_init_wandb_local(tmp_path):
 def test_init_wandb_non_master_always_dummy(tmp_path):
     """Non-master ranks always get DummyWandb regardless of wandb mode."""
     for mode in ("local", "disabled", "online"):
-        cfg = CommonConfig(run="my-run", wandb=mode, base_dir=str(tmp_path))
-        w = init_wandb(cfg, {}, master_process=False)
+        _init(tmp_path, wandb=mode)
+        w = init_wandb({}, master_process=False)
         assert isinstance(w, DummyWandb), f"expected DummyWandb for mode={mode}, non-master"
 
 
 def test_init_wandb_legacy_dummy_run(tmp_path):
     """run='dummy' magic maps to DummyWandb even if wandb='local'."""
-    cfg = CommonConfig(run="dummy", wandb="local", base_dir=str(tmp_path))
-    w = init_wandb(cfg, {}, master_process=True)
+    _init(tmp_path, run="dummy", wandb="local")
+    w = init_wandb({}, master_process=True)
     assert isinstance(w, DummyWandb)
 
 
 def test_init_wandb_wandb_mode_env(tmp_path, monkeypatch):
     """WANDB_MODE=disabled env var maps to DummyWandb."""
     monkeypatch.setenv("WANDB_MODE", "disabled")
-    cfg = CommonConfig(run="my-run", wandb="local", base_dir=str(tmp_path))
-    w = init_wandb(cfg, {}, master_process=True)
+    _init(tmp_path, wandb="local")
+    w = init_wandb({}, master_process=True)
     assert isinstance(w, DummyWandb)

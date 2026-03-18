@@ -4,10 +4,9 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import Any, Union
 
-if TYPE_CHECKING:
-    from nanochat.config import CommonConfig
+from nanochat.config import current
 
 
 class DummyWandb:
@@ -42,12 +41,11 @@ class LocalWandb(DummyWandb):
 
 
 def init_wandb(
-    config: "CommonConfig",
     user_config: dict[str, Any],
     master_process: bool,
     project_suffix: str | None = None,
 ) -> Union[DummyWandb, LocalWandb, object]:
-    """Unified wandb initialisation.
+    """Unified wandb initialisation. Reads common config from current.get().
 
     Resolution order:
     1. Non-master ranks always get DummyWandb (no logging from worker processes).
@@ -58,6 +56,7 @@ def init_wandb(
     if not master_process:
         return DummyWandb()
 
+    config = current.get().common
     mode = config.wandb
     # honour legacy --run=dummy magic and WANDB_MODE env var
     if config.run == "dummy" or os.environ.get("WANDB_MODE") == "disabled":
