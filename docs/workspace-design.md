@@ -130,10 +130,9 @@ def get_tokenizer() -> RustBPETokenizer:
 
 ## Migration strategy
 
-### Phase 1 — Add `workspace.py`, keep `common/paths.py`
+### Phase 1 — Add `workspace.py`, keep `common/paths.py` ✅
 
-- Create `workspace.py` with `init`, `reset`, and all path functions
-- Initialize it in CLI entry point after `current.init(config)`
+- `workspace.py` with `init`, `base_dir`, `reset`, and all path functions
 - Both modules coexist — `paths.py` still works for callers not yet migrated
 
 ### Phase 2 — Migrate leaf functions
