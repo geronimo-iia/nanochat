@@ -255,7 +255,9 @@ def train_base(config: Config):
 
     orig_model = model
     if device_type != "mps":
-        model = torch.compile(model, dynamic=False)  # the inputs to model will never change shape so dynamic=False is safe
+        model = torch.compile(
+            model, dynamic=False
+        )  # the inputs to model will never change shape so dynamic=False is safe
     else:
         print0("Skipping torch.compile on MPS (inductor backend not supported, causes NaN gradients)")
 
