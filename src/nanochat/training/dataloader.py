@@ -24,7 +24,7 @@ from nanochat.dataset import list_parquet_files
 
 
 def _document_batches(
-    base_dir: str, split: str, resume_state_dict: dict[str, object] | None, tokenizer_batch_size: int
+    split: str, resume_state_dict: dict[str, object] | None, tokenizer_batch_size: int
 ):
     """
     Infinite iterator over document batches (list of text strings) from parquet files.
@@ -36,7 +36,7 @@ def _document_batches(
     _, ddp_rank, _, ddp_world_size = get_dist_info()
 
     warn_on_legacy = ddp_rank == 0 and split == "train"  # rank 0 on train split will warn on legacy
-    parquet_paths = list_parquet_files(base_dir=base_dir, warn_on_legacy=warn_on_legacy)
+    parquet_paths = list_parquet_files(warn_on_legacy=warn_on_legacy)
     assert len(parquet_paths) != 0, "No dataset parquet files found, did you run dataset.py?"
     parquet_paths = parquet_paths[:-1] if split == "train" else parquet_paths[-1:]
 
@@ -75,7 +75,6 @@ def _document_batches(
 
 
 def tokenizing_distributed_data_loader_with_state_bos_bestfit(
-    base_dir: str,
     tokenizer: object,
     B: int,
     T: int,
@@ -105,7 +104,7 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
     assert split in ["train", "val"], "split must be 'train' or 'val'"
 
     row_capacity = T + 1
-    batches = _document_batches(base_dir, split, resume_state_dict, tokenizer_batch_size)
+    batches = _document_batches(split, resume_state_dict, tokenizer_batch_size)
     bos_token = tokenizer.get_bos_token_id()
     doc_buffer = []
     pq_idx, rg_idx, epoch = 0, 0, 1
@@ -171,7 +170,6 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
 
 
 def tokenizing_distributed_data_loader_bos_bestfit(
-    base_dir: str,
     tokenizer: object,
     B: int,
     T: int,
@@ -184,7 +182,6 @@ def tokenizing_distributed_data_loader_bos_bestfit(
 ):
     """Helper that omits state_dict from yields."""
     for inputs, targets, _ in tokenizing_distributed_data_loader_with_state_bos_bestfit(
-        base_dir,
         tokenizer,
         B,
         T,

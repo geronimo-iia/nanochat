@@ -18,8 +18,8 @@ import pytest
 import torch
 
 import nanochat.models.flash_attention as fa_module  # noqa: E402
-from nanochat.models.flash_attention import HAS_FA3, flash_attn
 from nanochat.evaluation.engine import KVCache
+from nanochat.models.flash_attention import HAS_FA3, flash_attn
 
 
 def set_impl(impl):

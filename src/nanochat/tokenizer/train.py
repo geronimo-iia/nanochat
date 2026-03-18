@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 import torch
 
-from nanochat.common import tokenizer_dir as get_tokenizer_dir
+from nanochat import workspace
 from nanochat.config import Config
 from nanochat.dataset import parquets_iter_batched
 from nanochat.report import get_report
@@ -39,7 +39,7 @@ def tokenizer_train(config: Config) -> None:
         3) Break when we've seen args.max_chars characters
         """
         nchars = 0
-        for batch in parquets_iter_batched(base_dir=config.common.base_dir, split="train"):
+        for batch in parquets_iter_batched(split="train"):
             for doc in batch:
                 doc_text = doc
                 if len(doc_text) > config.tokenizer.doc_cap:
@@ -61,7 +61,7 @@ def tokenizer_train(config: Config) -> None:
 
     # -------------------------------------------------------------------------
     # Save the tokenizer to disk
-    tok_dir = get_tokenizer_dir(config.common.base_dir)
+    tok_dir = workspace.tokenizer_dir()
     tokenizer.save(tok_dir)
 
     # -------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def tokenizer_train(config: Config) -> None:
 
     # Log to report
     token_bytes_nonzero = (token_bytes[token_bytes > 0]).to(dtype=torch.float32)
-    get_report(config.common.base_dir).log(
+    get_report().log(
         section="Tokenizer training",
         data=[
             asdict(config.tokenizer),

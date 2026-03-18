@@ -11,7 +11,7 @@ from typing import cast
 
 import torch
 
-from nanochat.common import checkpoint_dir
+from nanochat import workspace
 from nanochat.models.config import GPTConfig
 from nanochat.models.gpt import GPT
 from nanochat.tokenizer import get_tokenizer
@@ -91,7 +91,7 @@ def load_checkpoint(
 
 
 def build_model(
-    base_dir: str, checkpoint_dir: str, step: int, device: torch.device, phase: str
+    checkpoint_dir: str, step: int, device: torch.device, phase: str
 ) -> tuple[GPT, object, dict[str, object]]:
     """
     A bunch of repetitive code to build a model from a given checkpoint.
@@ -124,7 +124,7 @@ def build_model(
     else:
         model.train()
     # Load the Tokenizer
-    tokenizer = get_tokenizer(base_dir=base_dir)
+    tokenizer = get_tokenizer()
     # Sanity check: compatibility between model and tokenizer
     assert tokenizer.get_vocab_size() == model_config_kwargs["vocab_size"], (
         f"Tokenizer vocab size {tokenizer.get_vocab_size()} does not match model config vocab size {model_config_kwargs['vocab_size']}"
@@ -166,32 +166,32 @@ def find_last_step(checkpoint_dir: str) -> int:
 
 
 def load_model_from_dir(
-    base_dir: str, phase: str, device: torch.device, model_tag: str | None = None, step: int | None = None
+    phase: str, device: torch.device, model_tag: str | None = None, step: int | None = None
 ) -> tuple[GPT, object, dict[str, object]]:
-    phase_dir = checkpoint_dir(base_dir, phase)
+    phase_dir = workspace.checkpoint_dir(phase)
     if model_tag is None:
         model_tag = find_largest_model(phase_dir)
         log0(f"No model tag provided, guessing model tag: {model_tag}")
-    ckpt_dir = checkpoint_dir(base_dir, phase, model_tag)
+    ckpt_dir = workspace.checkpoint_dir(phase, model_tag)
     if step is None:
         step = find_last_step(ckpt_dir)
     log0(f"Loading model from {ckpt_dir} with step {step}")
-    model, tokenizer, meta_data = build_model(base_dir, ckpt_dir, step, device, phase)
+    model, tokenizer, meta_data = build_model(ckpt_dir, step, device, phase)
     return model, tokenizer, meta_data
 
 
-def load_model(base_dir: str, source: str, *args: object, **kwargs: object) -> tuple[GPT, object, dict[str, object]]:
-    return load_model_from_dir(base_dir, source, *args, **kwargs)
+def load_model(source: str, *args: object, **kwargs: object) -> tuple[GPT, object, dict[str, object]]:
+    return load_model_from_dir(source, *args, **kwargs)
 
 
 def load_optimizer_state(
-    base_dir: str, source: str, device: torch.device, rank: int, model_tag: str | None = None, step: int | None = None
+    source: str, device: torch.device, rank: int, model_tag: str | None = None, step: int | None = None
 ) -> dict[str, object] | None:
     """Load just the optimizer shard for a given rank, without re-loading the model."""
-    phase_dir = checkpoint_dir(base_dir, source)
+    phase_dir = workspace.checkpoint_dir(source)
     if model_tag is None:
         model_tag = find_largest_model(phase_dir)
-    ckpt_dir = checkpoint_dir(base_dir, source, model_tag)
+    ckpt_dir = workspace.checkpoint_dir(source, model_tag)
     if step is None:
         step = find_last_step(ckpt_dir)
     optimizer_path = os.path.join(ckpt_dir, f"optim_{step:06d}_rank{rank:d}.pt")

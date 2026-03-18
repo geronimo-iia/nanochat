@@ -16,19 +16,19 @@ import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import gc
 import json
+import math
 import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-import math
 from typing import Callable, cast
 
 import torch
 import torch.distributed as dist
 
+from nanochat import workspace
 from nanochat.common import (
     autodetect_device_type,
-    checkpoint_dir,
     compute_cleanup,
     compute_init,
     get_compute_dtype,
@@ -40,11 +40,11 @@ from nanochat.common import (
     print0,
     print_banner,
 )
-from nanochat.models.flash_attention import HAS_FA3, _use_fa3
 from nanochat.config import Config
 from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine
 from nanochat.evaluation.loss_eval import evaluate_bpb
+from nanochat.models.flash_attention import HAS_FA3, _use_fa3
 from nanochat.models.gpt import GPT, GPTConfig, Linear
 from nanochat.report import get_report
 from nanochat.tokenizer import get_token_bytes, get_tokenizer
@@ -182,8 +182,8 @@ def train_base(config: Config):
 
     # -----------------------------------------------------------------------------
     # Tokenizer will be useful for evaluation and also we need the vocab size to init the model
-    tokenizer = get_tokenizer(base_dir=config.common.base_dir)
-    token_bytes = get_token_bytes(device=device, base_dir=config.common.base_dir)
+    tokenizer = get_tokenizer()
+    token_bytes = get_token_bytes(device=device)
     vocab_size = tokenizer.get_vocab_size()
     print0(f"Vocab size: {vocab_size:,}")
 
@@ -205,10 +205,8 @@ def train_base(config: Config):
     model.init_weights()  # 3) All tensors get initialized
 
     # If we are resuming, overwrite the model parameters with those of the checkpoint
-    base_dir = config.common.base_dir
     output_dirname = config.training.model_tag if config.training.model_tag else f"d{config.training.depth}"
-    ckpt_dir = checkpoint_dir(base_dir, "base", output_dirname)
-    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_dir = workspace.checkpoint_dir("base", output_dirname)
     config.save(Path(ckpt_dir) / "config.toml")
     optimizer_data: dict[str, object] | None = None
     meta_data: dict[str, object] | None = None
@@ -383,7 +381,6 @@ def train_base(config: Config):
         assert meta_data is not None
         dataloader_resume_state_dict = meta_data["dataloader_state_dict"]
     train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
-        base_dir,
         tokenizer,
         config.training.device_batch_size,
         config.training.max_seq_len,
@@ -392,7 +389,7 @@ def train_base(config: Config):
         resume_state_dict=dataloader_resume_state_dict,
     )
     build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
-        base_dir, tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
+        tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
     )
 
     # -----------------------------------------------------------------------------
@@ -514,7 +511,6 @@ def train_base(config: Config):
                 model.eval()
                 with disable_fp8(orig_model):
                     results = evaluate_core(
-                        base_dir=base_dir,
                         model=orig_model,
                         tokenizer=tokenizer,
                         device=device,
@@ -737,7 +733,7 @@ def train_base(config: Config):
         if val_bpb is not None:
             print0(f"Minimum validation bpb: {min_val_bpb:.6f}")
 
-        get_report(config.common.base_dir).log(
+        get_report().log(
             section="Base model training",
             data=[
                 user_config,  # CLI args

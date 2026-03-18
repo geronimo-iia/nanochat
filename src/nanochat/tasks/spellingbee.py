@@ -30,6 +30,7 @@ import random
 import re
 from typing import Mapping, cast
 
+from nanochat import workspace
 from nanochat.common import download_file_with_lock
 from nanochat.tasks.base import Task
 
@@ -119,13 +120,13 @@ USER_MSG_TEMPLATES = [
 
 
 class SpellingBee(Task):
-    def __init__(self, base_dir: str, size: int = 1000, split: str = "train", **kwargs: object) -> None:
+    def __init__(self, size: int = 1000, split: str = "train", **kwargs: object) -> None:
         super().__init__(**kwargs)
         assert split in ["train", "test"], "SpellingBee split must be train|test"
         self.size = size
         self.split = split
         filename = WORD_LIST_URL.split("/")[-1]
-        word_list_path = download_file_with_lock(base_dir, WORD_LIST_URL, filename)
+        word_list_path = download_file_with_lock(workspace.data_dir(), WORD_LIST_URL, filename)
         with open(word_list_path, "r", encoding="utf-8") as f:
             words = [line.strip() for line in f]
         self.words = words
@@ -237,13 +238,13 @@ Then count the occurrences of '{letter}':
 class SimpleSpelling(Task):
     """Much simpler task designed to get the model to just practice spelling words."""
 
-    def __init__(self, base_dir: str, size: int = 1000, split: str = "train", **kwargs: object) -> None:
+    def __init__(self, size: int = 1000, split: str = "train", **kwargs: object) -> None:
         super().__init__(**kwargs)
         assert split in ["train", "test"], "SpellingBee split must be train|test"
         self.size = size
         self.split = split
         filename = WORD_LIST_URL.split("/")[-1]
-        word_list_path = download_file_with_lock(base_dir, WORD_LIST_URL, filename)
+        word_list_path = download_file_with_lock(workspace.data_dir(), WORD_LIST_URL, filename)
         with open(word_list_path, "r", encoding="utf-8") as f:
             words = [line.strip() for line in f]
         rng = random.Random(42)

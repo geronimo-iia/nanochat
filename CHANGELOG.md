@@ -8,6 +8,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `workspace.py` — module-level path store replacing `common/paths.py`; initialized once at startup via `workspace.init()`, provides all path functions (`data_dir`, `tokenizer_dir`, `checkpoint_dir`, `eval_results_dir`, etc.) without `base_dir` parameter threading
+
+### Changed
+
+- All `base_dir` parameter threading removed across `tokenizer/`, `dataset/`, `report/`, `training/`, `evaluation/`, `chat/`, and `tasks/` packages — all path resolution now goes through `workspace`
+- `common/paths.py` deleted — replaced by `workspace.py`
+- `download_file_with_lock` signature changed: `base_dir` → `data_dir` (caller passes the target directory directly)
+- Scheduler functions co-located in training scripts (`train_base.py`, `train_sft.py`, `train_rl.py`); `training/schedulers.py` deleted
+- `init_wandb` no longer takes `CommonConfig` param — reads from `current.get().common` internally
+- `get_report()` and `manage_report()` no longer take path params — use `workspace.report_dir()` internally
+
+### Removed
+
+- `common/paths.py` — all path functions moved to `workspace.py`
+- `training/schedulers.py` — scheduler functions co-located in training scripts
+
+### Added
+
 - `docs/guides/tuning-guide.md` — parameter recommendations for tokenizer, pretraining, and SFT across hardware tiers
 - `pyright` `executionEnvironments` in `pyproject.toml` — suppresses `reportMissingParameterType` in `tests/` and `dev/`
 

@@ -20,11 +20,12 @@ Usage:
 # pyright: reportMissingParameterType=false
 import argparse
 
+from nanochat import workspace
 from nanochat.chat.chat_cli import chat_cli
 from nanochat.chat.chat_web import chat_web_server
 from nanochat.config import (
-    Config,
     CommonConfig,
+    Config,
     ConfigLoader,
     EvaluationConfig,
     RLConfig,
@@ -35,7 +36,6 @@ from nanochat.config import (
     config_show,
     init_config,
 )
-from nanochat import workspace
 from nanochat.dataset.climbmix import climbmix_download
 from nanochat.evaluation.base_eval import base_eval
 from nanochat.evaluation.chat_eval import chat_eval
@@ -97,10 +97,10 @@ def _init_cli_report(sub):
     report_sub.required = True
 
     p = report_sub.add_parser("generate", help="Generate nanochat training reports.")
-    p.set_defaults(func=lambda args: manage_report(_load(ConfigLoader(), args), command="generate"))
+    p.set_defaults(func=lambda args: (_load(ConfigLoader(), args), manage_report(command="generate")))
 
     p = report_sub.add_parser("reset", help="Reset nanochat training reports.")
-    p.set_defaults(func=lambda args: manage_report(_load(ConfigLoader(), args), command="reset"))
+    p.set_defaults(func=lambda args: (_load(ConfigLoader(), args), manage_report(command="reset")))
 
 
 def _init_cli_data(sub):

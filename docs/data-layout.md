@@ -69,21 +69,21 @@ $NANOCHAT_BASE_DIR/
 
 ## Path Management
 
-All paths are defined in `src/nanochat/common/paths.py` — the single source of truth. No module constructs paths from `base_dir` directly. Available functions:
+All paths are defined in `src/nanochat/workspace.py` — the single source of truth. No module constructs paths from `base_dir` directly. Available functions:
 
 | Function                               | Returns                            |
 | -------------------------------------- | ---------------------------------- |
-| `data_dir(base_dir)`                   | `data/climbmix/`                   |
-| `legacy_data_dir(base_dir)`            | `data/fineweb/`                    |
-| `tokenizer_dir(base_dir)`              | `tokenizer/`                       |
-| `checkpoint_dir(base_dir, phase, tag)` | `checkpoints/{base,sft,rl}/<tag>/` |
-| `checkpoint_dir(base_dir, phase)`      | `checkpoints/{base,sft,rl}/`       |
-| `eval_tasks_dir(base_dir)`             | `data/eval_tasks/`                 |
-| `eval_results_dir(base_dir)`           | `eval/`                            |
-| `report_dir(base_dir)`                 | `report/`                          |
-| `identity_data_path(base_dir)`         | `identity.jsonl`                   |
+| `workspace.data_dir()`                 | `data/climbmix/`                   |
+| `workspace.legacy_data_dir()`          | `data/fineweb/`                    |
+| `workspace.tokenizer_dir()`            | `tokenizer/`                       |
+| `workspace.checkpoint_dir(phase, tag)` | `checkpoints/{base,sft,rl}/<tag>/` |
+| `workspace.checkpoint_dir(phase)`      | `checkpoints/{base,sft,rl}/`       |
+| `workspace.eval_tasks_dir()`           | `data/eval_tasks/`                 |
+| `workspace.eval_results_dir()`         | `eval/`                            |
+| `workspace.report_dir()`               | `report/`                          |
+| `workspace.identity_data_path()`       | `identity.jsonl`                   |
 
-All functions create the directory if absent (except `legacy_data_dir` and `identity_data_path`).
+All functions create the directory if absent (except `legacy_data_dir` and `identity_data_path`). The workspace is initialized once at startup via `workspace.init()` after config is loaded.
 
 ## Model Tags
 

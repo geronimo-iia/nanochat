@@ -23,11 +23,11 @@ Examples:
 import os
 from typing import cast
 
+from nanochat import workspace
 from nanochat.common import (
     autodetect_device_type,
     compute_cleanup,
     compute_init,
-    eval_results_dir,
     print0,
 )
 from nanochat.config import Config
@@ -45,8 +45,6 @@ from nanochat.training.dataloader import tokenizing_distributed_data_loader_bos_
 
 
 def base_eval(config: Config):
-    base_dir = config.common.base_dir
-
     # Parse evaluation modes
     eval_modes = set(mode.strip() for mode in config.evaluation.modes.split(","))
 
@@ -63,14 +61,13 @@ def base_eval(config: Config):
         model_slug = config.evaluation.hf_path.replace("/", "-")
     else:
         model, tokenizer, meta = load_model_from_dir(
-            base_dir=base_dir,
             phase="base",
             device=device,
             model_tag=config.evaluation.model_tag,
             step=config.evaluation.step,
         )
         sequence_len = cast(int, cast(dict[str, object], meta["model_config"])["sequence_len"])
-        token_bytes = get_token_bytes(base_dir=base_dir, device=device)
+        token_bytes = get_token_bytes(device=device)
         model_name = f"base_model (step {cast(int, meta['step'])})"
         model_slug = f"base_model_{cast(int, meta['step']):06d}"
 
@@ -135,7 +132,7 @@ def base_eval(config: Config):
 
         for split_name in ["train", "val"]:
             loader = tokenizing_distributed_data_loader_bos_bestfit(
-                base_dir, tokenizer, config.evaluation.device_batch_size, sequence_len, split_name, device=device
+                tokenizer, config.evaluation.device_batch_size, sequence_len, split_name, device=device
             )
             bpb = evaluate_bpb(model, loader, steps, token_bytes)
             bpb_results[split_name] = bpb
@@ -147,7 +144,6 @@ def base_eval(config: Config):
         print0("CORE Evaluation")
         print0("=" * 80)
         core_results = evaluate_core(
-            base_dir=base_dir,
             model=model,
             tokenizer=tokenizer,
             device=device,
@@ -156,7 +152,7 @@ def base_eval(config: Config):
 
         # Write CSV output
         if ddp_rank == 0:
-            output_csv_path = os.path.join(eval_results_dir(base_dir), f"{model_slug}.csv")
+            output_csv_path = os.path.join(workspace.eval_results_dir(), f"{model_slug}.csv")
             with open(output_csv_path, "w", encoding="utf-8", newline="") as f:
                 f.write(f"{'Task':<35}, {'Accuracy':<10}, {'Centered':<10}\n")
                 for label in cast(dict[str, object], core_results["results"]):
@@ -184,6 +180,6 @@ def base_eval(config: Config):
     if unconditioned_samples:
         report_data.append({f"unconditioned {i}": s for i, s in enumerate(unconditioned_samples)})
 
-    get_report(base_dir=base_dir).log(section="Base model evaluation", data=report_data)
+    get_report().log(section="Base model evaluation", data=report_data)
 
     compute_cleanup()

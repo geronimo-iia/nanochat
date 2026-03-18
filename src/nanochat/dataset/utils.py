@@ -10,28 +10,28 @@ import os
 
 import pyarrow.parquet as pq
 
-from nanochat.common import data_dir as _data_dir
+from nanochat import workspace
 
 # -----------------------------------------------------------------------------
 # These functions are useful utilities to other modules, can/should be imported
 
 
-def list_parquet_files(base_dir: str, warn_on_legacy: bool = False) -> list[str]:
+def list_parquet_files(warn_on_legacy: bool = False) -> list[str]:
     """Looks into a data dir and returns full paths to all parquet files."""
-    data_dir = _data_dir(base_dir=base_dir)
+    data_dir = workspace.data_dir()
     parquet_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".parquet") and not f.endswith(".tmp")])
     parquet_paths = [os.path.join(data_dir, f) for f in parquet_files]
     return parquet_paths
 
 
-def parquets_iter_batched(base_dir: str, split: str, start: int = 0, step: int = 1):
+def parquets_iter_batched(split: str, start: int = 0, step: int = 1):
     """
     Iterate through the dataset, in batches of underlying row_groups for efficiency.
     - split can be "train" or "val". the last parquet file will be val.
     - start/step are useful for skipping rows in DDP. e.g. start=rank, step=world_size
     """
     assert split in ["train", "val"], "split must be 'train' or 'val'"
-    parquet_paths = list_parquet_files(base_dir)
+    parquet_paths = list_parquet_files()
     parquet_paths = parquet_paths[:-1] if split == "train" else parquet_paths[-1:]
     for filepath in parquet_paths:
         pf = pq.ParquetFile(filepath)

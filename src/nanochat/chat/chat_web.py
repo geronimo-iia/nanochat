@@ -75,7 +75,6 @@ def chat_web_server(
 
     app = create_app(
         device_type=device_type,
-        base_dir=config.common.base_dir,
         num_gpus=num_gpus,
         source=source,
         temperature=temperature,

@@ -15,12 +15,12 @@ RED = "\033[91m"
 RESET = "\033[0m"
 
 
-def _build_tokenizer(name: str, base_dir: str) -> RustBPETokenizer:
+def _build_tokenizer(name: str) -> RustBPETokenizer:
     if name == "gpt2":
         return RustBPETokenizer.from_pretrained("gpt2")
     if name == "gpt4":
         return RustBPETokenizer.from_pretrained("cl100k_base")
-    return get_tokenizer(base_dir=base_dir)
+    return get_tokenizer()
 
 
 def _encode_text(tokenizer: RustBPETokenizer, label: str, text: str) -> dict[str, object]:
@@ -87,9 +87,9 @@ def tokenizer_eval(config: Config) -> None:
             the dataset and the trained tokenizer.
     """
     # The tokenizer was trained on data from earlier shards, so it has seen this data
-    train_docs = next(parquets_iter_batched(base_dir=config.common.base_dir, split="train"))
+    train_docs = next(parquets_iter_batched(split="train"))
     train_text = "\n".join(train_docs)
-    val_docs = next(parquets_iter_batched(base_dir=config.common.base_dir, split="val"))
+    val_docs = next(parquets_iter_batched(split="val"))
     val_text = "\n".join(val_docs)
 
     all_text = [
@@ -108,7 +108,7 @@ def tokenizer_eval(config: Config) -> None:
     vocab_sizes = {}
 
     for tokenizer_name in ["gpt2", "gpt4", "ours"]:
-        tokenizer = _build_tokenizer(tokenizer_name, config.common.base_dir)
+        tokenizer = _build_tokenizer(tokenizer_name)
         vocab_sizes[tokenizer_name] = tokenizer.get_vocab_size()
         tokenizer_results[tokenizer_name] = {}
 
@@ -150,7 +150,7 @@ def tokenizer_eval(config: Config) -> None:
             )
         lines.append("")
     report_markdown = "\n".join(lines)
-    get_report(base_dir=config.common.base_dir).log(
+    get_report().log(
         section="Tokenizer evaluation",
         data=[
             report_markdown,

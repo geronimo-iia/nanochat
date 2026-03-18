@@ -29,9 +29,9 @@ def test_print0_non_master_silent(monkeypatch, capsys):
 
 def test_skips_download_if_file_exists(tmp_path):
     """File already present — urlopen must never be called."""
-    data_root = tmp_path / "data"
-    data_root.mkdir(parents=True)
-    target = data_root / "file.bin"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+    target = data_dir / "file.bin"
     target.write_bytes(b"data")
 
     called = []
@@ -44,7 +44,7 @@ def test_skips_download_if_file_exists(tmp_path):
     original = ur.urlopen
     ur.urlopen = fake_urlopen
     try:
-        result = download_file_with_lock(str(tmp_path), "http://example.com/file.bin", "file.bin")
+        result = download_file_with_lock(str(data_dir), "http://example.com/file.bin", "file.bin")
     finally:
         ur.urlopen = original
 
@@ -72,11 +72,11 @@ def test_double_check_inside_lock(tmp_path, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda url: FakeResponse())
 
     # First call downloads
-    download_file_with_lock(str(tmp_path), "http://example.com/tok.bin", "tok.bin")
+    download_file_with_lock(str(data_dir), "http://example.com/tok.bin", "tok.bin")
     assert len(download_count) == 1
 
     # Second call hits the outer early-exit (file exists)
-    download_file_with_lock(str(tmp_path), "http://example.com/tok.bin", "tok.bin")
+    download_file_with_lock(str(data_dir), "http://example.com/tok.bin", "tok.bin")
     assert len(download_count) == 1
 
 
@@ -96,7 +96,7 @@ def test_lock_file_removed_after_download(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda url: FakeResponse())
 
-    download_file_with_lock(str(tmp_path), "http://example.com/f.bin", "f.bin")
+    download_file_with_lock(str(data_dir), "http://example.com/f.bin", "f.bin")
 
     lock_path = str(data_dir / "f.bin") + ".lock"
     assert not os.path.exists(lock_path)
@@ -120,7 +120,7 @@ def test_postprocess_fn_called(tmp_path, monkeypatch):
 
     processed = []
     download_file_with_lock(
-        str(tmp_path),
+        str(data_dir),
         "http://example.com/x.bin",
         "x.bin",
         postprocess_fn=lambda p: processed.append(p),

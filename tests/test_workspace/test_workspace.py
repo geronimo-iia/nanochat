@@ -4,10 +4,10 @@ import os
 
 import pytest
 
+from nanochat import workspace
 from nanochat.config import current
 from nanochat.config.common import CommonConfig
 from nanochat.config.config import Config
-from nanochat import workspace
 
 
 @pytest.fixture(autouse=True)

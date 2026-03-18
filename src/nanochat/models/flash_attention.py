@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import torch
 import torch.nn.functional as F
+
 from nanochat.common.dtype import get_compute_dtype
 
 

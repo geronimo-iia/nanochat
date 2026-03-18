@@ -2,8 +2,7 @@
 
 import pytest
 
-from nanochat.config import ConfigLoader
-from nanochat.config import current
+from nanochat.config import ConfigLoader, current
 from nanochat.config.common import CommonConfig
 from nanochat.config.config import Config
 

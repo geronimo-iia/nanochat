@@ -23,7 +23,8 @@ from typing import cast
 import torch
 import torch.distributed as dist
 
-from nanochat.common import autodetect_device_type, checkpoint_dir, compute_cleanup, compute_init, init_wandb, print0
+from nanochat import workspace
+from nanochat.common import autodetect_device_type, compute_cleanup, compute_init, init_wandb, print0
 from nanochat.config import Config
 from nanochat.evaluation.engine import Engine
 from nanochat.report import get_report
@@ -54,7 +55,6 @@ def train_rl(config: Config):
 
     # Init model and tokenizer
     model, tokenizer, _ = load_model_from_dir(
-        base_dir=config.common.base_dir,
         phase="sft",
         device=device,
         model_tag=config.rl.model_tag,
@@ -320,7 +320,7 @@ def train_rl(config: Config):
             output_dirname = (
                 config.rl.model_tag if config.rl.model_tag else f"d{depth}"
             )  # base the model tag on the depth of the base model
-            chk_dir = checkpoint_dir(base_dir=config.common.base_dir, phase="rl", model_tag=output_dirname)
+            chk_dir = workspace.checkpoint_dir("rl", output_dirname)
             model_config_kwargs = (
                 model.config.__dict__
             )  # slightly naughty, abusing the simplicity of GPTConfig, TODO nicer
@@ -336,7 +336,7 @@ def train_rl(config: Config):
             print(f"✅ Saved model checkpoint to {chk_dir}")
 
     # Log to report
-    get_report(base_dir=config.common.base_dir).log(
+    get_report().log(
         section="Chat RL",
         data=[
             user_config,  # CLI args

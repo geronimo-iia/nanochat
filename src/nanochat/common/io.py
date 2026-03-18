@@ -8,8 +8,6 @@ from typing import Callable, Optional
 import requests
 from filelock import FileLock
 
-from nanochat.common.paths import root_data_dir
-
 
 def download_single_file(data_dir: str, url: str, filename: str, max_attempts: int = 5) -> bool:
     """Downloads a single file index, with some backoff"""
@@ -59,13 +57,13 @@ def download_single_file(data_dir: str, url: str, filename: str, max_attempts: i
 
 
 def download_file_with_lock(
-    base_dir: str, url: str, filename: str, postprocess_fn: Optional[Callable[[str], None]] = None
+    data_dir: str, url: str, filename: str, postprocess_fn: Optional[Callable[[str], None]] = None
 ) -> str:
     """
     Downloads a file from a URL to a local path in the base directory.
     Uses a lock file to prevent concurrent downloads among multiple ranks.
     """
-    file_path = os.path.join(root_data_dir(base_dir), filename)
+    file_path = os.path.join(data_dir, filename)
     lock_path = file_path + ".lock"
 
     if os.path.exists(file_path):

@@ -5,8 +5,8 @@ read_when:
   - Implementing or reviewing the workspace refactor
   - Adding new path functions or directory conventions
   - Understanding how paths.py evolves into the workspace module
-status: active
-last_updated: "2025-07-15"
+status: done
+last_updated: "2025-07-16"
 ---
 
 # Workspace Design
@@ -135,7 +135,7 @@ def get_tokenizer() -> RustBPETokenizer:
 - `workspace.py` with `init`, `base_dir`, `reset`, and all path functions
 - Both modules coexist — `paths.py` still works for callers not yet migrated
 
-### Phase 2 — Migrate leaf functions
+### Phase 2 — Migrate leaf functions ✅
 
 Functions that only need a path and currently take `base_dir`:
 
@@ -147,7 +147,7 @@ Functions that only need a path and currently take `base_dir`:
 
 Remove `base_dir` parameter, use `workspace.*()` internally.
 
-### Phase 3 — Migrate mid-level functions
+### Phase 3 — Migrate mid-level functions ✅
 
 Functions that pass `base_dir` through to leaf functions:
 
@@ -158,7 +158,7 @@ Functions that pass `base_dir` through to leaf functions:
 | `evaluation/core_benchmark.py` | `evaluate_core`                                              |
 | `tasks/spellingbee.py`         | `SpellingBee.__init__`, `SimpleSpelling.__init__`            |
 
-### Phase 4 — Clean up entry points and remove `common/paths.py`
+### Phase 4 — Clean up entry points and remove `common/paths.py` ✅
 
 Training/eval entry points stop extracting `base_dir` as a local variable:
 
@@ -180,7 +180,7 @@ reference `workspace.py` instead.
 
 ---
 
-## Testing
+## Testing ✅
 
 ```python
 @pytest.fixture(autouse=True)

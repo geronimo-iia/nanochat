@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import os
 import tomllib
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
-from nanochat.common import get_default_base_dir
 from nanochat.config.common import CommonConfig
 from nanochat.config.config import SECTION_CLS, Config
+
+
+def _get_default_base_dir() -> str:
+    if os.environ.get("NANOCHAT_BASE_DIR"):
+        nanochat_dir = os.environ["NANOCHAT_BASE_DIR"]
+    else:
+        nanochat_dir = os.path.join(os.path.expanduser("~"), ".cache", "nanochat")
+    os.makedirs(nanochat_dir, exist_ok=True)
+    return nanochat_dir
 
 
 class ConfigLoader:
@@ -62,7 +71,7 @@ class ConfigLoader:
             toml_path = Path(cli["config"])
             base_dir = str(toml_path.parent)
         if base_dir is None:
-            base_dir = get_default_base_dir()
+            base_dir = _get_default_base_dir()
             candidate = Path(base_dir) / "config.toml"
             if candidate.exists():
                 toml_path = candidate

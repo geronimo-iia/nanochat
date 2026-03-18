@@ -12,15 +12,16 @@ from typing import Mapping
 
 import yaml
 
-from nanochat.common import download_file_with_lock, eval_tasks_dir, print0
+from nanochat import workspace
+from nanochat.common import download_file_with_lock, print0
 from nanochat.evaluation.core_eval import evaluate_task
 
 EVAL_BUNDLE_URL = "https://karpathy-public.s3.us-west-2.amazonaws.com/eval_bundle.zip"
 
 
-def place_eval_bundle(base_dir: str, file_path: str) -> None:
+def place_eval_bundle(file_path: str) -> None:
     """Unzip eval_bundle.zip and place it in the base directory."""
-    eval_bundle_dir = eval_tasks_dir(base_dir)
+    eval_bundle_dir = workspace.eval_tasks_dir()
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(file_path, "r") as zip_ref:
             zip_ref.extractall(tmpdir)
@@ -30,19 +31,19 @@ def place_eval_bundle(base_dir: str, file_path: str) -> None:
 
 
 def evaluate_core(
-    base_dir: str, model: object, tokenizer: object, device: object, max_per_task: int = -1
+    model: object, tokenizer: object, device: object, max_per_task: int = -1
 ) -> Mapping[str, object]:
     """
     Evaluate a model on the CORE benchmark.
     Returns dict with results, centered_results, and core_metric.
     """
-    eval_bundle_dir = eval_tasks_dir(base_dir)
+    eval_bundle_dir = workspace.eval_tasks_dir()
     if not os.path.exists(eval_bundle_dir):
         download_file_with_lock(
-            base_dir,
+            workspace.data_dir(),
             EVAL_BUNDLE_URL,
             "eval_bundle.zip",
-            postprocess_fn=lambda file_path: place_eval_bundle(base_dir, file_path),
+            postprocess_fn=place_eval_bundle,
         )
 
     config_path = os.path.join(eval_bundle_dir, "core.yaml")

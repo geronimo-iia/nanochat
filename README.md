@@ -87,7 +87,7 @@ The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of runni
 
 ## Precision / dtype
 
-nanochat does not use `torch.amp.autocast`. Instead, precision is managed explicitly through a single global `COMPUTE_DTYPE` (defined in `nanochat/common/`). By default this is auto-detected based on your hardware:
+nanochat does not use `torch.amp.autocast`. Instead, precision is managed explicitly through a single global `COMPUTE_DTYPE` (defined in `nanochat/common/dtype.py`). By default this is auto-detected based on your hardware:
 
 | Hardware                      | Default dtype | Why                                                                    |
 | ----------------------------- | ------------- | ---------------------------------------------------------------------- |

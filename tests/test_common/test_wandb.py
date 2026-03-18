@@ -5,7 +5,7 @@ import json
 import pytest
 
 from nanochat.common.wandb import DummyWandb, LocalWandb, init_wandb
-from nanochat.config import Config, reset_config, init_config
+from nanochat.config import Config, init_config, reset_config
 from nanochat.config.common import CommonConfig
 
 

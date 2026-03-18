@@ -12,7 +12,6 @@ from nanochat.chat.server.worker_pool import WorkerPool
 
 def create_app(
     device_type: str,
-    base_dir: str,
     num_gpus: int,
     source: str,
     temperature: float,
@@ -26,7 +25,6 @@ def create_app(
 
     Args:
         device_type: Device to run inference on: ``cuda``, ``cpu``, or ``mps``.
-        base_dir: Nanochat base directory for checkpoint loading.
         num_gpus: Number of GPU workers to spawn.
         source: Checkpoint source: ``sft`` or ``rl``.
         temperature: Default sampling temperature.
@@ -40,7 +38,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         print("Loading nanochat models across GPUs...")
-        app.state.worker_pool = WorkerPool(device_type, base_dir=base_dir, num_gpus=num_gpus)
+        app.state.worker_pool = WorkerPool(device_type, num_gpus=num_gpus)
         await app.state.worker_pool.initialize(source, model_tag=model_tag, step=step)
         print(f"Server ready at http://localhost:{port}")
         yield

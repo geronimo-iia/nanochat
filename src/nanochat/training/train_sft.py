@@ -20,9 +20,9 @@ from dataclasses import asdict
 import torch
 import torch.distributed as dist
 
+from nanochat import workspace
 from nanochat.common import (
     autodetect_device_type,
-    checkpoint_dir,
     compute_cleanup,
     compute_init,
     get_compute_dtype,
@@ -34,11 +34,11 @@ from nanochat.common import (
     print0,
     print_banner,
 )
-from nanochat.models.flash_attention import HAS_FA3
 from nanochat.config import Config
 from nanochat.evaluation.chat_eval import run_chat_eval
 from nanochat.evaluation.engine import Engine
 from nanochat.evaluation.loss_eval import evaluate_bpb
+from nanochat.models.flash_attention import HAS_FA3
 from nanochat.report import get_report
 from nanochat.tasks.base import TaskMixture
 from nanochat.tasks.customjson import CustomJSON
@@ -78,7 +78,6 @@ def sft_muon_momentum_scheduler():
 def train_sft(config: Config):
     print_banner()
     user_config = asdict(config)
-    base_dir = config.common.base_dir
     # -----------------------------------------------------------------------------
 
     # Init compute/precision
@@ -107,7 +106,7 @@ def train_sft(config: Config):
 
     # Load the model and tokenizer
     model, tokenizer, meta = load_model_from_dir(
-        base_dir=base_dir, device=device, phase="base", model_tag=config.sft.model_tag, step=config.sft.model_step
+        device=device, phase="base", model_tag=config.sft.model_tag, step=config.sft.model_step
     )
 
     # Inherit training hyperparameters from pretrained checkpoint (None = inherit, explicit value = override)
@@ -144,7 +143,7 @@ def train_sft(config: Config):
     )
     print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
     print0(f"Total batch size {config.sft.total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
-    token_bytes = get_token_bytes(base_dir=config.common.base_dir, device=device)
+    token_bytes = get_token_bytes(device=device)
 
     # Initialize the Optimizer (combined MuonAdamW: Muon for matrix params, AdamW for rest)
     # Note that pretraining ramps weight_decay to zero by end of pretraining, so SFT continues with zero
@@ -162,7 +161,6 @@ def train_sft(config: Config):
 
     if config.sft.load_optimizer:
         optimizer_data = load_optimizer_state(
-            base_dir=config.common.base_dir,
             source="base",
             device=device,
             rank=ddp_rank,
@@ -190,7 +188,7 @@ def train_sft(config: Config):
         group["initial_lr"] = group["lr"]
 
     # SFT data mixture and DataLoader
-    identity_conversations_filepath = os.path.join(base_dir, "identity.jsonl")
+    identity_conversations_filepath = workspace.identity_data_path()
     train_tasks = [
         SmolTalk(split="train"),  # 460K rows of general conversations
         CustomJSON(filepath=identity_conversations_filepath),  # 1000 rows of synthetic identity conversations
@@ -198,10 +196,10 @@ def train_sft(config: Config):
         *[MMLU(subset="auxiliary_train", split="train") for _ in range(config.sft.mmlu_epochs)],  # 100K rows per epoch
         *[GSM8K(subset="main", split="train") for _ in range(config.sft.gsm8k_epochs)],  # 8K rows per epoch
         SimpleSpelling(
-            base_dir=base_dir, size=200000, split="train"
+            size=200000, split="train"
         ),  # 200K rows of Simple Spelling (e.g. spell the word 'apple')
         SpellingBee(
-            base_dir=base_dir, size=80000, split="train"
+            size=80000, split="train"
         ),  # 80K rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
     ]
     train_dataset = TaskMixture(train_tasks)
@@ -419,7 +417,6 @@ def train_sft(config: Config):
                     orig_model,
                     tokenizer,
                     engine,
-                    base_dir=base_dir,
                     batch_size=config.sft.device_batch_size,
                     max_problems=max_problems,
                 )
@@ -449,7 +446,7 @@ def train_sft(config: Config):
         # save checkpoint at the end of the run (all ranks participate so each saves its optimizer shard)
         if last_step:
             output_dirname = config.sft.model_tag if config.sft.model_tag else f"d{depth}"  # e.g. d12
-            ckpt_dir = checkpoint_dir(base_dir, "sft", output_dirname)
+            ckpt_dir = workspace.checkpoint_dir("sft", output_dirname)
             save_checkpoint(
                 ckpt_dir,
                 step,
@@ -561,7 +558,7 @@ def train_sft(config: Config):
 
     # Log to report
 
-    get_report(base_dir=config.common.base_dir).log(
+    get_report().log(
         section="SFT",
         data=[
             user_config,  # CLI args

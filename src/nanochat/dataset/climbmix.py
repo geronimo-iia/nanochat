@@ -8,7 +8,7 @@ Functions:
 
 from multiprocessing import Pool
 
-from nanochat.common import data_dir as _data_dir
+from nanochat import workspace
 from nanochat.common import download_single_file
 from nanochat.config import Config
 
@@ -45,7 +45,7 @@ def climbmix_download(cfg: Config, num_files: int = -1, num_workers: int = 4) ->
         num_workers: Number of parallel download workers.
     """
     # Prepare the output directory
-    data_dir = _data_dir(base_dir=cfg.common.base_dir)
+    data_dir = workspace.data_dir()
 
     # The way this works is that the user specifies the number of train shards to download via the -n flag.
     # In addition to that, the validation shard is *always* downloaded and is pinned to be the last shard.

@@ -6,7 +6,7 @@ read_when:
   - Looking for where to add a feature or fix a bug
   - Understanding how packages relate to each other
 status: active
-last_updated: "2026-06-14"
+last_updated: "2025-07-16"
 ---
 
 # Code Structure
@@ -19,10 +19,11 @@ All source code lives under `src/nanochat/`. Each package has a single responsib
 src/nanochat/
 ├── cli.py            # Subcommand dispatch — entry point for the nanochat CLI
 ├── __main__.py       # Delegates to cli.main (enables python -m nanochat)
+├── workspace.py      # Module-level path store — owns all paths under NANOCHAT_BASE_DIR
 ├── execution.py      # Sandboxed Python code execution (used by HumanEval)
 │
 ├── config/           # Configuration dataclasses, TOML loading, CLI arg parsing
-├── common/           # Shared utilities: paths, dtype, distributed, wandb, I/O
+├── common/           # Shared utilities: dtype, distributed, wandb, I/O
 ├── models/           # GPT model architecture
 ├── tokenizer/        # BPE tokenizer: training, inference, evaluation
 ├── dataset/          # ClimbMix dataset download and shard iteration
@@ -35,17 +36,19 @@ src/nanochat/
 
 ## Package Responsibilities
 
+### `workspace.py`
+Module-level path store initialized once at startup (after config). Owns all filesystem paths under `NANOCHAT_BASE_DIR` — replaces the old `common/paths.py`. Call `workspace.init()` once; use `workspace.data_dir()`, `workspace.checkpoint_dir(phase, tag)`, etc. everywhere. See [data-layout.md](data-layout.md).
+
 ### `config/`
 Dataclasses for each training mode (`CommonConfig`, `TrainingConfig`, `SFTConfig`, `RLConfig`, `EvaluationConfig`, `TokenizerConfig`) plus `Config` (the aggregate) and `ConfigLoader` (TOML + CLI resolution). See [configuration.md](configuration.md).
 
 Key files: `loader.py`, `config.py`, `common.py`, `cli.py`
 
 ### `common/`
-Shared utilities used across all packages. Nothing in `common/` imports from other nanochat packages.
+Shared utilities used across all packages. Nothing in `common/` imports from other nanochat packages (except `wandb.py` which reads from `config/`).
 
 | Module           | Responsibility                                                   |
 | ---------------- | ---------------------------------------------------------------- |
-| `paths.py`       | Single source of truth for all filesystem paths under `base_dir` |
 | `distributed.py` | DDP init/cleanup, device autodetection                           |
 | `dtype.py`       | Compute dtype selection (bf16/fp16/fp32) per device              |
 | `hardware.py`    | Peak FLOPS, device sync                                          |
@@ -82,7 +85,6 @@ Training loops and supporting infrastructure.
 | `train_sft.py`           | Supervised fine-tuning loop                                          |
 | `train_rl.py`            | GRPO reinforcement learning loop                                     |
 | `optimizer.py`           | `MuonAdamW` and `DistMuonAdamW` optimizers                           |
-| `schedulers.py`          | LR, weight decay, and Muon momentum scheduler factories              |
 | `scaling.py`             | Scaling law utilities (compute-optimal step count, total batch size) |
 | `checkpoint.py`          | Save/load model, optimizer, and training metadata                    |
 | `dataloader.py`          | Distributed token dataloader over ClimbMix shards                    |
@@ -121,16 +123,16 @@ Sandboxed Python code execution for HumanEval scoring. Runs generated code in a 
 nanochat train base --depth 12
   └── cli.main()
         └── ConfigLoader().add_training().resolve(args) → Config
-              └── train_base(config)
-                    ├── compute_init()          # common/distributed.py
-                    ├── get_tokenizer()         # tokenizer/utils.py
-                    ├── GPT(GPTConfig(...))     # models/gpt.py
-                    ├── MuonAdamW(...)          # training/optimizer.py
-                    ├── create_lr_scheduler()   # training/schedulers.py
-                    └── training loop
-                          ├── evaluate_bpb()   # evaluation/loss_eval.py
-                          ├── evaluate_core()  # evaluation/core_benchmark.py
-                          └── save_checkpoint() # training/checkpoint.py
+              └── current.init(config) + workspace.init()
+                    └── train_base(config)
+                          ├── compute_init()          # common/distributed.py
+                          ├── get_tokenizer()         # tokenizer/utils.py
+                          ├── GPT(GPTConfig(...))     # models/gpt.py
+                          ├── MuonAdamW(...)          # training/optimizer.py
+                          └── training loop
+                                ├── evaluate_bpb()   # evaluation/loss_eval.py
+                                ├── evaluate_core()  # evaluation/core_benchmark.py
+                                └── save_checkpoint() # training/checkpoint.py
 ```
 
 ### Config resolution
@@ -156,11 +158,12 @@ Engine(model, tokenizer, device)
 
 - `common/` has no intra-nanochat imports
 - `config/` has no intra-nanochat imports
+- `workspace.py` imports only from `config/`
 - `models/` imports only from `common/`
 - `tasks/` imports only from `common/`
-- `tokenizer/` imports only from `common/`
-- `dataset/` imports only from `common/`
-- `training/` imports from `common/`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
-- `evaluation/` imports from `common/`, `models/`, `tokenizer/`, `tasks/`
+- `tokenizer/` imports from `common/`, `workspace`
+- `dataset/` imports from `common/`, `workspace`
+- `training/` imports from `common/`, `workspace`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
+- `evaluation/` imports from `common/`, `workspace`, `models/`, `tokenizer/`, `tasks/`
 - `chat/` imports from `common/`, `config/`, `evaluation/`, `tokenizer/`
 - `cli.py` imports from all packages (top-level wiring only)

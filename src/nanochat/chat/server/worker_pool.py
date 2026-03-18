@@ -24,11 +24,10 @@ class Worker:
 class WorkerPool:
     """Pool of workers, each with a model replica on a different GPU."""
 
-    def __init__(self, device_type: str, base_dir: str, num_gpus: Optional[int] = None):
+    def __init__(self, device_type: str, num_gpus: Optional[int] = None):
         if num_gpus is None:
             num_gpus = torch.cuda.device_count() if device_type == "cuda" else 1
         self.device_type = device_type
-        self.base_dir = base_dir
         self.num_gpus = num_gpus
         self.workers: List[Worker] = []
         self.available_workers: asyncio.Queue[Worker] = asyncio.Queue()
@@ -47,7 +46,7 @@ class WorkerPool:
                 device = torch.device(self.device_type)
                 print(f"Loading model on {self.device_type}...")
 
-            model, tokenizer, _ = load_model(self.base_dir, source, device, model_tag=model_tag, step=step)
+            model, tokenizer, _ = load_model(source, device, model_tag=model_tag, step=step)
             engine = Engine(model, tokenizer)
             worker = Worker(gpu_id=gpu_id, device=device, engine=engine, tokenizer=tokenizer)
             self.workers.append(worker)
