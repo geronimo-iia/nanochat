@@ -379,7 +379,7 @@ def train_base(config: Config):
     get_lr_multiplier = create_lr_scheduler(
         num_iterations, config.training.warmup_steps, config.training.warmdown_ratio, config.training.final_lr_frac
     )
-    get_muon_momentum = create_muon_momentum_scheduler()
+    get_muon_momentum = create_muon_momentum_scheduler(num_iterations, config.training.warmdown_ratio)
     get_weight_decay = create_weight_decay_scheduler(weight_decay_scaled, num_iterations)
 
     # -----------------------------------------------------------------------------

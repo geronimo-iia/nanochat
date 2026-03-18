@@ -80,6 +80,11 @@ class GPT(nn.Module):
         # Per-layer learnable scalars (inspired by modded-nanogpt)
         self.resid_lambdas = nn.Parameter(torch.ones(config.n_layer))
         self.x0_lambdas = nn.Parameter(torch.zeros(config.n_layer))
+        # Smear: mix previous token's embedding into current token (cheap bigram-like info)
+        self.smear_gate = Linear(24, 1, bias=False)
+        self.smear_lambda = nn.Parameter(torch.zeros(1))
+        # Backout: subtract cached mid-layer residual before final norm to remove low-level features
+        self.backout_lambda = nn.Parameter(0.2 * torch.ones(1))
 
         # Value embeddings (ResFormer-style): alternating layers, last layer always included
         head_dim = config.n_embd // config.n_head
@@ -113,12 +118,15 @@ class GPT(nn.Module):
             torch.nn.init.uniform_(block.attn.c_k.weight, -s, s)
             torch.nn.init.uniform_(block.attn.c_v.weight, -s, s)
             torch.nn.init.zeros_(block.attn.c_proj.weight)
-            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s * 0.5, s * 0.5)
+            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s * 0.4, s * 0.4)
             torch.nn.init.zeros_(block.mlp.c_proj.weight)
 
-        # Per-layer scalars
-        self.resid_lambdas.fill_(1.0)
-        self.x0_lambdas.fill_(0.1)
+        # Per-layer scalars: non-uniform init
+        n_layer = self.config.n_layer
+        for i in range(n_layer):
+            self.resid_lambdas.data[i] = 1.15 - (0.10 * i / max(n_layer - 1, 1))
+        for i in range(n_layer):
+            self.x0_lambdas.data[i] = 0.20 - (0.15 * i / max(n_layer - 1, 1))
 
         # Value embeddings
         for ve in self.value_embeds.values():
@@ -166,7 +174,7 @@ class GPT(nn.Module):
         assert all(c in "SL" for c in pattern), f"Invalid window_pattern: {pattern}. Use only S and L."
 
         long_window = config.sequence_len
-        short_window = -(-long_window // 3 // 128) * 128  # ceil to FA3 tile size
+        short_window = -(-long_window // 4 // 128) * 128  # ceil to FA3 tile size
         char_to_window = {
             "L": (long_window, 0),
             "S": (short_window, 0),
@@ -196,6 +204,9 @@ class GPT(nn.Module):
             + value_embeds_numel
             + self.resid_lambdas.numel()
             + self.x0_lambdas.numel()
+            + self.smear_gate.weight.numel()
+            + self.smear_lambda.numel()
+            + self.backout_lambda.numel()
         )
 
         h, q, t = self.config.n_head, self.config.n_embd // self.config.n_head, self.config.sequence_len
@@ -216,7 +227,13 @@ class GPT(nn.Module):
         value_embeds = sum(p.numel() for p in self.value_embeds.parameters())
         lm_head = sum(p.numel() for p in self.lm_head.parameters())
         transformer_matrices = sum(p.numel() for p in self.transformer.h.parameters())
-        scalars = self.resid_lambdas.numel() + self.x0_lambdas.numel()
+        scalars = (
+            self.resid_lambdas.numel()
+            + self.x0_lambdas.numel()
+            + self.smear_gate.weight.numel()
+            + self.smear_lambda.numel()
+            + self.backout_lambda.numel()
+        )
         total = wte + value_embeds + lm_head + transformer_matrices + scalars
 
         assert total == sum(p.numel() for p in self.parameters()), "Parameter count mismatch"
@@ -249,6 +266,7 @@ class GPT(nn.Module):
         lm_head_params = list(self.lm_head.parameters())
         resid_params = [self.resid_lambdas]
         x0_params = [self.x0_lambdas]
+        smear_params = [self.smear_gate.weight, self.smear_lambda, self.backout_lambda]
 
         assert len(list(self.parameters())) == (
             len(matrix_params)
@@ -257,6 +275,7 @@ class GPT(nn.Module):
             + len(value_embeds_params)
             + len(resid_params)
             + len(x0_params)
+            + len(smear_params)
         )
 
         # Scale the LR for the AdamW parameters by ∝1/√dmodel
@@ -294,6 +313,7 @@ class GPT(nn.Module):
                 kind="adamw", params=resid_params, lr=scalar_lr * 0.01, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.05
             ),
             dict(kind="adamw", params=x0_params, lr=scalar_lr, betas=(0.96, 0.95), eps=1e-10, weight_decay=0.0),
+            dict(kind="adamw", params=smear_params, lr=0.2, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0),
         ]
 
         # Muon groups (matrix params, grouped by shape for stacking)
@@ -340,17 +360,44 @@ class GPT(nn.Module):
         T0 = 0 if kv_cache is None else kv_cache.get_pos()
         cos_sin = self.cos[:, T0 : T0 + T], self.sin[:, T0 : T0 + T]
 
-        # Forward the trunk of the Transformer
+        # Embed the tokens
         x = self.transformer.wte(idx)
         x = x.to(get_compute_dtype())
         x = norm(x)
-        x0 = x  # save initial normalized embedding for x0 residual
 
+        # Smear: mix previous token's embedding into current position (cheap bigram info)
+        if kv_cache is None:
+            # Training / naive generate: full sequence available, use fast slice
+            assert T > 1, "Training forward pass should have T > 1"
+            gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
+            x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+        else:
+            # KV cache inference: read prev embedding from cache, store current for next step
+            x_pre_smear = kv_cache.prev_embedding
+            kv_cache.prev_embedding = x[:, -1:, :]
+            if T > 1:
+                # Prefill: apply smear to positions 1+, same as training
+                gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
+                x = torch.cat([x[:, :1], x[:, 1:] + gate * x[:, :-1]], dim=1)
+            elif x_pre_smear is not None:
+                # Decode: single token, use cached prev embedding
+                gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, :, :24]))
+                x = x + gate * x_pre_smear
+
+        # Forward the trunk of the Transformer
+        x0 = x  # save initial normalized embedding for x0 residual
+        n_layer = self.config.n_layer
+        backout_layer = n_layer // 2  # cache at halfway point
+        x_backout = None
         for i, block in enumerate(self.transformer.h):
             x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
             ve = self.value_embeds[str(i)](idx).to(x.dtype) if str(i) in self.value_embeds else None
             x = block(x, ve, cos_sin, self.window_sizes[i], kv_cache)
-
+            if i == backout_layer:
+                x_backout = x
+        # Subtract mid-layer residual to remove low-level features before logit projection
+        if x_backout is not None:
+            x = x - self.backout_lambda.to(x.dtype) * x_backout
         x = norm(x)
 
         # Forward the lm_head (compute logits)

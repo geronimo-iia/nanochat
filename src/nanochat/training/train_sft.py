@@ -48,7 +48,7 @@ from nanochat.tasks.smoltalk import SmolTalk
 from nanochat.tasks.spellingbee import SimpleSpelling, SpellingBee
 from nanochat.tokenizer import get_token_bytes
 from nanochat.training.checkpoint import load_model_from_dir, load_optimizer_state, save_checkpoint
-from nanochat.training.schedulers import create_muon_momentum_scheduler
+from nanochat.training.schedulers import create_sft_muon_momentum_scheduler
 
 
 def train_sft(config: Config):
@@ -339,7 +339,7 @@ def train_sft(config: Config):
             decay = (progress - (1.0 - config.sft.warmdown_ratio)) / config.sft.warmdown_ratio
             return (1 - decay) * 1.0 + decay * config.sft.final_lr_frac
 
-    get_muon_momentum = create_muon_momentum_scheduler()
+    get_muon_momentum = create_sft_muon_momentum_scheduler()
 
     # -----------------------------------------------------------------------------
     # Training loop

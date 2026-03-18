@@ -94,8 +94,8 @@ class CausalSelfAttention(nn.Module):
         cos, sin = cos_sin
         q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
         q, k = norm(q), norm(k)  # QK norm
-        q = q * 1.15  # sharper attention (split scale between Q and K)
-        k = k * 1.15
+        q = q * 1.2  # sharper attention (split scale between Q and K)
+        k = k * 1.2
 
         # Flash Attention (FA3 on Hopper+, PyTorch SDPA fallback elsewhere)
         # window_size is (left, right) tuple: (N, 0) for causal, (-1, 0) for full context

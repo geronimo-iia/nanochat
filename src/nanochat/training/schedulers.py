@@ -35,8 +35,43 @@ def create_lr_scheduler(
     return get_lr_multiplier
 
 
-def create_muon_momentum_scheduler() -> Callable[[int], float]:
-    """Create momentum scheduler for Muon optimizer (warms up to 0.97 over first 400 steps).
+def create_muon_momentum_scheduler(
+    num_iterations: int,
+    warmdown_ratio: float,
+) -> Callable[[int], float]:
+    """Create momentum scheduler for Muon optimizer (base training).
+
+    Warms up to 0.97 over first 400 steps, holds, then warms down to 0.90
+    during the LR warmdown phase.
+
+    Args:
+        num_iterations: Total number of training iterations
+        warmdown_ratio: Ratio of iterations for warmdown phase
+
+    Returns:
+        Function that takes iteration number and returns momentum value
+    """
+    warmdown_iters = round(warmdown_ratio * num_iterations)
+    warmdown_start = num_iterations - warmdown_iters
+
+    def get_muon_momentum(it: int) -> float:
+        if it < 400:
+            frac = it / 400
+            return (1 - frac) * 0.85 + frac * 0.97
+        elif it >= warmdown_start:
+            progress = (it - warmdown_start) / warmdown_iters
+            return 0.97 * (1 - progress) + 0.90 * progress
+        else:
+            return 0.97
+
+    return get_muon_momentum
+
+
+def create_sft_muon_momentum_scheduler() -> Callable[[int], float]:
+    """Create momentum scheduler for Muon optimizer (SFT).
+
+    Simple warmup to 0.95 over first 400 steps, no warmdown.
+    Matches upstream's SFT behavior.
 
     Returns:
         Function that takes iteration number and returns momentum value
@@ -44,8 +79,7 @@ def create_muon_momentum_scheduler() -> Callable[[int], float]:
 
     def get_muon_momentum(it: int) -> float:
         frac = min(it / 400, 1)
-        momentum = (1 - frac) * 0.85 + frac * 0.97
-        return momentum
+        return (1 - frac) * 0.85 + frac * 0.95
 
     return get_muon_momentum
 
