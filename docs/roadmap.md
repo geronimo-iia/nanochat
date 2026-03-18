@@ -75,6 +75,7 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **Scheduler placement** — move scheduler functions from shared `schedulers.py` to co-located named functions in each training script. See [study](scheduler-placement-study.md).
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
+- **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
 - **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).
 - **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint.py`. Document in quickstart guide.
 - **MPS fp16 vs fp32 loss curves** — `GradScaler(device='mps')` works natively on Apple Silicon. A d8 comparison run (fp16 vs fp32) would confirm whether fp16 training is numerically stable in practice.
