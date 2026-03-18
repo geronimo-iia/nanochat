@@ -31,6 +31,15 @@ from nanochat.tasks.gsm8k import GSM8K
 from nanochat.training.checkpoint import load_model_from_dir, save_checkpoint
 
 
+def rl_lr_scheduler(num_steps: int):
+    """Linear rampdown to zero over num_steps."""
+
+    def get_lr_multiplier(it: int) -> float:
+        return 1.0 - it / num_steps
+
+    return get_lr_multiplier
+
+
 def train_rl(config: Config):
     user_config = asdict(config)
     # -----------------------------------------------------------------------------
@@ -188,9 +197,7 @@ def train_rl(config: Config):
         group["initial_lr"] = group["lr"]
 
     # Learning rate scheduler: simple rampdown to zero over num_steps
-    def get_lr_multiplier(it: int):
-        lrm = 1.0 - it / num_steps
-        return lrm
+    get_lr_multiplier = rl_lr_scheduler(num_steps)
 
     # Calculate the number of examples each rank handles to achieve the desired examples_per_step
     print0(

@@ -5,8 +5,8 @@ read_when:
   - Deciding where scheduler functions should live
   - Reviewing the schedulers.py module
   - Integrating upstream changes that touch scheduler logic
-status: draft
-last_updated: "2025-07-14"
+status: done
+last_updated: "2025-07-15"
 ---
 
 # Scheduler Placement Study
@@ -157,5 +157,9 @@ train_rl.py
 
 ## Decision
 
-Pending review. Low-priority cleanup — the current layout works, it's just friction
-during upstream integration.
+**Option C — co-located named functions.** Implemented:
+
+- `train_base.py`: `base_lr_scheduler`, `base_muon_momentum_scheduler`, `base_weight_decay_scheduler`
+- `train_sft.py`: `sft_lr_scheduler`, `sft_muon_momentum_scheduler`
+- `train_rl.py`: `rl_lr_scheduler`
+- `schedulers.py` deleted, `training/__init__.py` scheduler exports removed.

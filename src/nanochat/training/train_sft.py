@@ -48,7 +48,31 @@ from nanochat.tasks.smoltalk import SmolTalk
 from nanochat.tasks.spellingbee import SimpleSpelling, SpellingBee
 from nanochat.tokenizer import get_token_bytes
 from nanochat.training.checkpoint import load_model_from_dir, load_optimizer_state, save_checkpoint
-from nanochat.training.schedulers import create_sft_muon_momentum_scheduler
+
+
+def sft_lr_scheduler(warmup_ratio: float, warmdown_ratio: float, final_lr_frac: float):
+    """Progress-based LR multiplier (0→1): linear warmup, constant, linear warmdown."""
+
+    def get_lr_multiplier(progress: float) -> float:
+        if progress < warmup_ratio:
+            return (progress + 1e-8) / warmup_ratio
+        elif progress <= 1.0 - warmdown_ratio:
+            return 1.0
+        else:
+            decay = (progress - (1.0 - warmdown_ratio)) / warmdown_ratio
+            return (1 - decay) * 1.0 + decay * final_lr_frac
+
+    return get_lr_multiplier
+
+
+def sft_muon_momentum_scheduler():
+    """Muon momentum: warmup to 0.95 over 400 steps, no warmdown."""
+
+    def get_muon_momentum(it: int) -> float:
+        frac = min(it / 400, 1)
+        return (1 - frac) * 0.85 + frac * 0.95
+
+    return get_muon_momentum
 
 
 def train_sft(config: Config):
@@ -327,19 +351,8 @@ def train_sft(config: Config):
     build_val_loader = lambda: sft_data_generator_bos_bestfit("val")
     progress = 0  # will go from 0 to 1 over the course of the epoch
 
-    # Learning rate schedule (linear warmup, constant, linear warmdown)
-    # Same shape as base_train but uses progress (0→1) instead of absolute step counts,
-    # because SFT doesn't always know num_iterations in advance (dataset-driven stopping).
-    def get_lr_multiplier(progress: float):
-        if progress < config.sft.warmup_ratio:
-            return (progress + 1e-8) / config.sft.warmup_ratio
-        elif progress <= 1.0 - config.sft.warmdown_ratio:
-            return 1.0
-        else:
-            decay = (progress - (1.0 - config.sft.warmdown_ratio)) / config.sft.warmdown_ratio
-            return (1 - decay) * 1.0 + decay * config.sft.final_lr_frac
-
-    get_muon_momentum = create_sft_muon_momentum_scheduler()
+    get_lr_multiplier = sft_lr_scheduler(config.sft.warmup_ratio, config.sft.warmdown_ratio, config.sft.final_lr_frac)
+    get_muon_momentum = sft_muon_momentum_scheduler()
 
     # -----------------------------------------------------------------------------
     # Training loop
