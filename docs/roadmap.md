@@ -6,7 +6,7 @@ read_when:
   - Deciding what to implement next
   - Understanding scope and sequencing
 status: draft
-last_updated: "2026-06-14"
+last_updated: "2026-06-15"
 ---
 
 # nanochat Roadmap
@@ -56,5 +56,24 @@ Sequencing depends on the Phase 1.5 outcome.
 
 ## Deferred
 
+### MPS Performance Investigations
+
+Baseline measured on M3 Max, d6, 10 steps, **without** `torch.compile` (eager mode):
+
+| metric | value |
+|---|---|
+| dt per step | ~20–22s |
+| tok/sec | ~23,000–25,000 |
+
+Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile` active, which causes NaN gradients — those numbers are invalid.
+
+- **`torch.compile` on MPS causes NaN gradients** — confirmed on PyTorch 2.9.1, M3 Max. The inductor backend is not supported on MPS. During gradient accumulation, every forward pass after the first backward produces NaN loss. Fixed by skipping `torch.compile` when `device_type == "mps"`. Cost: ~2.4× slower (~24k vs ~58k tok/sec at d6). See [m3-max-guide](m3-max-guide.md) for details.
+
+- **`autocast` in the hot-path forward** — added. The normal training path now wraps `model(x, y)` in `torch.amp.autocast(device_type=device_type, dtype=get_compute_dtype())`, consistent with the compression-tracking branch.
+
+- **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark, allowing the GPU to use more unified memory before falling back to CPU. Tested on d6 (10 steps): no measurable throughput improvement (~55,900–58,300 tok/sec vs baseline — but those numbers were with compile/NaN, so inconclusive). May help at larger depths where memory pressure is real.
+
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
+- **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).
+- **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint.py`. Document in quickstart guide.
 - **MPS fp16 vs fp32 loss curves** — `GradScaler(device='mps')` works natively on Apple Silicon. A d8 comparison run (fp16 vs fp32) would confirm whether fp16 training is numerically stable in practice.
