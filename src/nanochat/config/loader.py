@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from nanochat.common import get_default_base_dir
-from nanochat.config import current
 from nanochat.config.common import CommonConfig
 from nanochat.config.config import SECTION_CLS, Config
 
@@ -88,10 +87,3 @@ class ConfigLoader:
             cfg.common.base_dir = base_dir
 
         return cfg
-
-
-def load_and_init(loader: ConfigLoader, args: list[str] | None = None) -> Config:
-    """Parse, resolve, and register config in the module-level store."""
-    config = loader.parse(args)
-    current.init(config)
-    return config

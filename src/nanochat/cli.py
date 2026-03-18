@@ -17,10 +17,12 @@ Usage:
   nanochat serve                   # web chat server
 """
 
+# pyright: reportMissingParameterType=false
 import argparse
 
 from nanochat.chat import chat_cli, chat_web_server
 from nanochat.config import (
+    Config,
     CommonConfig,
     ConfigLoader,
     EvaluationConfig,
@@ -30,12 +32,22 @@ from nanochat.config import (
     TrainingConfig,
     config_init,
     config_show,
+    init_config,
 )
+from nanochat import workspace
 from nanochat.dataset import climbmix_download
 from nanochat.evaluation import base_eval, chat_eval
 from nanochat.report import manage_report
 from nanochat.tokenizer import tokenizer_eval, tokenizer_train
 from nanochat.training import train_base, train_rl, train_sft
+
+
+def _load(loader: ConfigLoader, ns: argparse.Namespace) -> Config:
+    """Load config, initialize workspace, and return config."""
+    config = loader.resolve(ns)
+    init_config(config)
+    workspace.init()
+    return config
 
 
 def main() -> None:
@@ -44,7 +56,19 @@ def main() -> None:
     sub = parser.add_subparsers(dest="group", metavar="<command>")
     sub.required = True
 
-    # --- config ---
+    _init_cli_config(sub)
+    _init_cli_data(sub)
+    _init_cli_train(sub)
+    _init_cli_eval(sub)
+    _init_cli_report(sub)
+    _init_cli_chat(sub)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+def _init_cli_config(sub):
+    """Register config subcommands: init, show."""
     config_p = sub.add_parser("config", help="config utilities")
     config_sub = config_p.add_subparsers(dest="config_cmd", metavar="<subcommand>")
     config_sub.required = True
@@ -58,21 +82,24 @@ def main() -> None:
     p = config_sub.add_parser("show", help="print resolved config")
     CommonConfig.update_parser(p)
     p.set_defaults(func=config_show)
+    return sub
 
-    # --- report ---
+
+def _init_cli_report(sub):
+    """Register report subcommands: generate, reset."""
     report_p = sub.add_parser("report", help="Reports utilities.")
     report_sub = report_p.add_subparsers(dest="report_cmd", metavar="<subcommand>")
     report_sub.required = True
 
     p = report_sub.add_parser("generate", help="Generate nanochat training reports.")
-    p.set_defaults(func=lambda args: ConfigLoader().resolve(args))
-    p.set_defaults(func=lambda args: manage_report(ConfigLoader().resolve(args), command="generate"))
+    p.set_defaults(func=lambda args: manage_report(_load(ConfigLoader(), args), command="generate"))
 
     p = report_sub.add_parser("reset", help="Reset nanochat training reports.")
-    p.set_defaults(func=lambda args: ConfigLoader().resolve(args))
-    p.set_defaults(func=lambda args: manage_report(ConfigLoader().resolve(args), command="reset"))
+    p.set_defaults(func=lambda args: manage_report(_load(ConfigLoader(), args), command="reset"))
 
-    # --- data ---
+
+def _init_cli_data(sub):
+    """Register data subcommands: download, tokenizer train/eval."""
     data_p = sub.add_parser("data", help="data utilities")
     data_sub = data_p.add_subparsers(dest="data_cmd", metavar="<subcommand>")
     data_sub.required = True
@@ -82,47 +109,50 @@ def main() -> None:
     p.add_argument("-w", "--num-workers", type=int, default=4, help="parallel download workers (default: 4)")
     p.set_defaults(
         func=lambda args: climbmix_download(
-            ConfigLoader().resolve(args), num_files=args.num_files, num_workers=args.num_workers
+            _load(ConfigLoader(), args), num_files=args.num_files, num_workers=args.num_workers
         )
     )
 
-    # --- tokenizer ---
     tok_p = data_sub.add_parser("tokenizer", help="tokenizer utilities")
     tok_sub = tok_p.add_subparsers(dest="tok_cmd", metavar="<subcommand>")
     tok_sub.required = True
 
     p = tok_sub.add_parser("train", help="train BPE tokenizer")
     TokenizerConfig.update_parser(p)
-    p.set_defaults(func=lambda args: tokenizer_train(ConfigLoader().add_tokenizer().resolve(args)))
+    p.set_defaults(func=lambda args: tokenizer_train(_load(ConfigLoader().add_tokenizer(), args)))
 
     p = tok_sub.add_parser("eval", help="evaluate tokenizer compression")
-    p.set_defaults(func=lambda args: tokenizer_eval(ConfigLoader().resolve(args)))
+    p.set_defaults(func=lambda args: tokenizer_eval(_load(ConfigLoader(), args)))
 
-    # --- train ---
+
+def _init_cli_train(sub):
+    """Register train subcommands: base, sft, rl."""
     train_p = sub.add_parser("train", help="training commands")
     train_sub = train_p.add_subparsers(dest="train_cmd", metavar="<subcommand>")
     train_sub.required = True
 
     p = train_sub.add_parser("base", help="pretrain base model")
     TrainingConfig.update_parser(p)
-    p.set_defaults(func=lambda args: train_base(ConfigLoader().add_training().resolve(args)))
+    p.set_defaults(func=lambda args: train_base(_load(ConfigLoader().add_training(), args)))
 
     p = train_sub.add_parser("sft", help="supervised fine-tuning")
     SFTConfig.update_parser(p)
-    p.set_defaults(func=lambda args: train_sft(ConfigLoader().add_sft().resolve(args)))
+    p.set_defaults(func=lambda args: train_sft(_load(ConfigLoader().add_sft(), args)))
 
     p = train_sub.add_parser("rl", help="reinforcement learning on GSM8K")
     RLConfig.update_parser(p)
-    p.set_defaults(func=lambda args: train_rl(ConfigLoader().add_rl().resolve(args)))
+    p.set_defaults(func=lambda args: train_rl(_load(ConfigLoader().add_rl(), args)))
 
-    # --- eval ---
+
+def _init_cli_eval(sub):
+    """Register eval subcommands: base, chat."""
     eval_p = sub.add_parser("eval", help="evaluation commands")
     EvaluationConfig.update_parser(eval_p)
     eval_sub = eval_p.add_subparsers(dest="eval_cmd", metavar="<subcommand>")
     eval_sub.required = True
 
     p = eval_sub.add_parser("base", help="evaluate base model")
-    p.set_defaults(func=lambda args: base_eval(ConfigLoader().add_evaluation().resolve(args)))
+    p.set_defaults(func=lambda args: base_eval(_load(ConfigLoader().add_evaluation(), args)))
 
     p = eval_sub.add_parser("chat", help="evaluate chat model")
     p.add_argument("-i", "--source", type=str, required=True, help="Source of the model: sft|rl")
@@ -139,7 +169,7 @@ def main() -> None:
     p.add_argument("-x", "--max-problems", type=int, default=None, help="Max problems to evaluate")
     p.set_defaults(
         func=lambda args: chat_eval(
-            config=ConfigLoader().resolve(args),
+            config=_load(ConfigLoader(), args),
             source=args.source,
             task_name=args.task_name,
             temperature=args.temperature,
@@ -153,7 +183,9 @@ def main() -> None:
         )
     )
 
-    # --- chat / serve ---
+
+def _init_cli_chat(sub):
+    """Register chat and serve subcommands."""
     p = sub.add_parser("chat", help="interactive chat CLI")
     p.add_argument("-i", "--source", type=str, default="sft", help="Source of the model: sft|rl")
     p.add_argument("-g", "--model-tag", type=str, default=None, help="Model tag to load")
@@ -163,7 +195,7 @@ def main() -> None:
     p.add_argument("-k", "--top-k", type=int, default=50, help="Top-k sampling parameter")
     p.set_defaults(
         func=lambda args: chat_cli(
-            ConfigLoader().resolve(args),
+            _load(ConfigLoader(), args),
             source=args.source,
             model_tag=args.model_tag,
             step=args.step,
@@ -185,7 +217,7 @@ def main() -> None:
     p.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server to")
     p.set_defaults(
         func=lambda args: chat_web_server(
-            config=ConfigLoader().resolve(args),
+            config=_load(ConfigLoader(), args),
             num_gpus=args.num_gpus,
             source=args.source,
             temperature=args.temperature,
@@ -197,6 +229,3 @@ def main() -> None:
             host=args.host,
         )
     )
-
-    args = parser.parse_args()
-    args.func(args)

@@ -1,8 +1,8 @@
-"""Tests for nanochat.config.current and load_and_init."""
+"""Tests for nanochat.config.current."""
 
 import pytest
 
-from nanochat.config import ConfigLoader, load_and_init
+from nanochat.config import ConfigLoader
 from nanochat.config import current
 from nanochat.config.common import CommonConfig
 from nanochat.config.config import Config
@@ -47,22 +47,26 @@ def test_init_overwrites():
 
 
 # ---------------------------------------------------------------------------
-# load_and_init
+# parse + init
 # ---------------------------------------------------------------------------
 
 
-def test_load_and_init_registers_config(tmp_path):
-    cfg = load_and_init(ConfigLoader(), ["--base-dir", str(tmp_path)])
+def test_parse_then_init_registers_config(tmp_path):
+    cfg = ConfigLoader().parse(["--base-dir", str(tmp_path)])
+    current.init(cfg)
     assert current.get() is cfg
 
 
-def test_load_and_init_returns_config(tmp_path):
-    cfg = load_and_init(ConfigLoader().add_training(), ["--base-dir", str(tmp_path), "--depth", "6"])
-    assert cfg.training.depth == 6
+def test_parse_then_init_config_values(tmp_path):
+    cfg = ConfigLoader().add_training().parse(["--base-dir", str(tmp_path), "--depth", "6"])
+    current.init(cfg)
+    assert current.get().training.depth == 6
 
 
-def test_load_and_init_resolve_stays_pure(tmp_path):
+def test_resolve_stays_pure(tmp_path):
     """resolve() alone must not touch current."""
-    ConfigLoader().resolve(__import__("argparse").Namespace(base_dir=str(tmp_path), config=None))
+    import argparse
+
+    ConfigLoader().resolve(argparse.Namespace(base_dir=str(tmp_path), config=None))
     with pytest.raises(RuntimeError):
         current.get()

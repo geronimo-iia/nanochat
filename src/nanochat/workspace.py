@@ -23,6 +23,7 @@ def init() -> None:
 
 
 def base_dir() -> str:
+    """Return the workspace root directory. Raises if workspace is not initialized."""
     if _base_dir is None:
         raise RuntimeError("Workspace not initialized — call workspace.init() first")
     return _base_dir
@@ -40,6 +41,7 @@ def reset() -> None:
 
 
 def _dir(*parts: str) -> str:
+    """Join parts under base_dir, create the directory if absent, and return the path."""
     path = os.path.join(base_dir(), *parts)
     os.makedirs(path, exist_ok=True)
     return path
@@ -51,22 +53,27 @@ def _dir(*parts: str) -> str:
 
 
 def data_dir() -> str:
+    """Return the primary training data directory (climbmix mix)."""
     return _dir("data", "climbmix")
 
 
 def legacy_data_dir() -> str:
+    """Return the legacy FinewebEdu-100B fallback path (not auto-created)."""
     return os.path.join(_dir("data"), "fineweb")
 
 
 def eval_tasks_dir() -> str:
+    """Return the directory for evaluation task datasets."""
     return _dir("data", "eval_tasks")
 
 
 def tokenizer_dir() -> str:
+    """Return the directory where tokenizer files are stored."""
     return _dir("tokenizer")
 
 
 def checkpoint_dir(phase: str, model_tag: str | None = None) -> str:
+    """Return the checkpoint directory for a training phase, optionally scoped to a model tag."""
     assert phase in ("base", "sft", "rl"), f"Unknown phase: {phase}"
     if model_tag is not None:
         return _dir("checkpoints", phase, model_tag)
@@ -74,12 +81,15 @@ def checkpoint_dir(phase: str, model_tag: str | None = None) -> str:
 
 
 def eval_results_dir() -> str:
+    """Return the directory where evaluation results are written."""
     return _dir("eval")
 
 
 def identity_data_path() -> str:
+    """Return the path to the identity fine-tuning data file."""
     return os.path.join(base_dir(), "identity.jsonl")
 
 
 def report_dir() -> str:
+    """Return the directory for training and evaluation reports."""
     return _dir("report")
