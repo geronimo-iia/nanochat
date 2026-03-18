@@ -79,7 +79,7 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 - **Config manager** ✅ — `config/current.py` and `load_and_init` implemented.
 - **Workspace module** ✅ All phases — `workspace.py` fully implemented, `common/paths.py` deleted, all `base_dir` threading removed.
 - **Scheduler placement** ✅ — schedulers co-located in training scripts, `schedulers.py` deleted.
-- **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
+- **Entry point refactor** — split `train_base.py`, `train_sft.py`, `train_rl.py`, `base_eval.py`, `chat_eval.py` into sub-packages with co-located state dataclasses. See [plan](entry-point-refactor.md).
 - **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
 - **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).
 - **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint.py`. Document in quickstart guide.
