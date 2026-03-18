@@ -6,7 +6,7 @@ read_when:
   - Debugging MPS-specific issues or performance
   - Choosing batch size and sequence length for MPS
 status: active
-last_updated: "2026-06-14"
+last_updated: "2026-06-15"
 ---
 
 # Apple Silicon (MPS) Guide
@@ -64,8 +64,8 @@ both paths at d12, T=1024, fp16). The explicit T×T bool mask is small (1MB at T
 | SDPA attention                        | ✅      | Automatic fallback from FA3                                      |
 | Compression tracking                  | ✅      | `--track-compression` works                                      |
 | Checkpoint save/load                  | ✅      | bf16→fp32 conversion on load                                     |
-| `torch.compile`                       | ✅      | Works on MPS (PyTorch 2.9.1) — ~17% speedup on optimizer kernels |
-| Muon optimizer                        | ✅      | Compiled Polar Express + variance reduction kernels work on MPS  |
+| `torch.compile`                       | ❌      | Causes NaN gradients on MPS during training (inductor backend not supported). Disabled automatically — see Known Workarounds. |
+| Muon optimizer                        | ✅      | Polar Express + variance reduction kernels work on MPS in eager mode  |
 | `torch.mps.synchronize()`             | ✅      | Used for accurate step timing                                    |
 | `torch.mps.empty_cache()`             | ✅      | Called between eval and training steps                           |
 | Memory reporting                      | ✅      | `torch.mps.current_allocated_memory()` for peak memory stats     |
@@ -84,6 +84,13 @@ correct — Apple Silicon uses unified memory (CPU and GPU share the same physic
 so there is no PCIe bus transfer to optimize. These flags have no benefit on MPS.
 
 ## Known Workarounds in Code
+
+**`torch.compile` disabled on MPS** (`training/train_base.py`):
+`torch.compile` with the inductor backend is not supported on MPS. When enabled, it produces
+NaN gradients on every forward pass during gradient accumulation (confirmed on PyTorch 2.9.1,
+M3 Max). The training script skips `torch.compile` automatically when `device_type == "mps"`.
+Cost: ~2.4× slower throughput (~24k vs ~58k tok/sec at d6). Override with `NANOCHAT_DTYPE=float32`
+if you want to experiment with compile on MPS.
 
 **int64 comparison on MPS** (`evaluation/loss_eval.py`):
 MPS lacks an int64 kernel for the `< 0` operator. The code uses `y.int() < 0` (int32 cast)

@@ -99,8 +99,10 @@ The defaults are well-tuned — only change these if you know what you're doing:
 
 ### Apple Silicon (MPS, fp16)
 
+**Memory tip**: Set `PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0` to allow the GPU to use more unified memory before falling back to CPU. No measurable throughput gain at small model sizes (d6 peak: ~2.3GB), but may prevent OOM at larger depths.
+
 ```bash
-nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
+PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
     --depth=6 \
     --max-seq-len=512 \
     --device-batch-size=4 \

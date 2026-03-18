@@ -253,8 +253,11 @@ def train_base(config: Config):
     # -----------------------------------------------------------------------------
     # Compile the model
 
-    orig_model = model  # original, uncompiled model, for saving raw model state_dict and for inference/evaluation (because the shapes may change shape)
-    model = torch.compile(model, dynamic=False)  # the inputs to model will never change shape so dynamic=False is safe
+    orig_model = model
+    if device_type != "mps":
+        model = torch.compile(model, dynamic=False)  # the inputs to model will never change shape so dynamic=False is safe
+    else:
+        print0("Skipping torch.compile on MPS (inductor backend not supported, causes NaN gradients)")
 
     # -----------------------------------------------------------------------------
     # Scaling laws and muP extrapolations to determine the optimal training horizon, batch size, learning rates, weight decay.
@@ -555,7 +558,8 @@ def train_base(config: Config):
                         logits_for_compression.view(-1, logits_for_compression.size(-1)), y.view(-1)
                     )
                 else:
-                    loss = model(x, y)
+                    with torch.amp.autocast(device_type=device_type, dtype=get_compute_dtype()):
+                        loss = model(x, y)
                 train_loss = loss.detach()  # for logging
                 loss = loss / grad_accum_steps  # each .backward() is a grad sum => normalize loss here
                 if scaler is not None:
