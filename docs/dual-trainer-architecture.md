@@ -87,15 +87,29 @@ New implementation targeting Apple Silicon natively:
 
 ---
 
-## Checkpoint interop via numpy
+## Checkpoint interop
+
+Two options for cross-backend checkpoint exchange:
+
+### Option A — numpy arrays
 
 `state_dict()` returns numpy arrays. Both PyTorch and MLX can read/write numpy natively:
 
-- **PyTorch → SFT**: `trainer.state_dict()` → numpy → MLX loads with `mx.array()`
-- **MLX → eval**: `trainer.state_dict()` → numpy → PyTorch loads with `torch.from_numpy()`
+- **PyTorch → MLX**: `torch.Tensor.numpy()` → `mx.array()`
+- **MLX → PyTorch**: `np.array(mx_tensor)` → `torch.from_numpy()`
 
-This means the checkpoint handoff between backends (e.g. base training on MLX → SFT on
-PyTorch, or vice versa) is just numpy serialization. No custom conversion utilities needed.
+### Option B — safetensors
+
+Both frameworks support safetensors natively:
+
+- **PyTorch**: `safetensors.torch.save_file` / `safetensors.torch.load_file`
+- **MLX**: `mx.save_safetensors` / `mx.load`
+
+Safetensors is memory-mapped, zero-copy, and already the standard format for HuggingFace
+models. It also enables compatibility with `mlx-lm` tooling for inference and quantization.
+
+Either option avoids custom conversion utilities. The choice depends on whether we want
+minimal dependencies (numpy) or ecosystem compatibility (safetensors).
 
 ---
 
