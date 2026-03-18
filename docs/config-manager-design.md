@@ -80,16 +80,24 @@ No convenience accessors for `base_dir` or paths — that's the [workspace modul
 
 ### Initialization
 
-Called once in the CLI entry point:
+`loader.py` exposes a `load_and_init` helper that builds config and registers it in one call:
 
 ```python
-# cli.py or __main__.py
-from nanochat.config import current
+# loader.py
+def load_and_init(loader: ConfigLoader, args: list[str] | None = None) -> Config:
+    config = loader.parse(args)
+    current.init(config)
+    return config
+```
 
-config = ConfigLoader().resolve(args)
-current.init(config)
+Called once in each CLI entry point:
+
+```python
+config = load_and_init(ConfigLoader().add_training())
 train_base(config)  # config still passed to top-level for explicitness
 ```
+
+`resolve()` stays pure — `load_and_init` is the opt-in side-effecting path.
 
 ### Usage in leaf functions
 
@@ -105,11 +113,13 @@ def get_tokenizer() -> RustBPETokenizer:
 
 ## Migration strategy
 
-### Phase 1 — Add `config/current.py`, keep existing signatures
+### Phase 1 — Add `config/current.py`, keep existing signatures ✅
 
-- Add `config/current.py` with `init`, `get`, `reset`
-- Initialize it in CLI entry point
-- Don't change any function signatures yet
+- `config/current.py` with `init`, `get`, `reset`
+- `load_and_init` helper in `loader.py`
+- Both exported from `config/__init__.py`
+- Initialized in CLI entry point via `load_and_init`
+- Existing function signatures unchanged
 
 ### Phase 2 — Migrate functions that receive `config` just to pass it through
 
