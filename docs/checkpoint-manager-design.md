@@ -217,6 +217,7 @@ src/nanochat/training/
 ### Training loop (train_base.py)
 
 ```python
+ckpt_dir = workspace.checkpoint_dir("base", model_tag)
 manager = TorchCheckpointManager(ckpt_dir, logger=RankZeroLogger())
 
 # Resume
@@ -273,5 +274,6 @@ model.load_state_dict(ckpt.model_state)
 ## Dependencies
 
 - Requires [TrainingState refactor](training-state-refactor.md) for `LoopState` / `to_loop_state()`
+- Benefits from [workspace module](workspace-design.md) — `workspace.checkpoint_dir()` replaces `checkpoint_dir(base_dir, ...)` threading
 - Enables [dual-trainer architecture](dual-trainer-architecture.md) checkpoint interop
 - Independent of [scheduler placement](scheduler-placement-study.md)

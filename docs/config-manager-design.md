@@ -1,9 +1,9 @@
 ---
 title: "Config Manager Design"
-summary: "Design for a ConfigManager singleton that eliminates config/base_dir parameter threading across the codebase."
+summary: "Module-level config store so the Config object doesn't need to be threaded as a parameter through every function call."
 read_when:
   - Implementing or reviewing the config manager refactor
-  - Adding new functions that need access to config or base_dir
+  - Adding new functions that need access to config
   - Understanding why config is passed explicitly everywhere
 status: draft
 last_updated: "2025-07-14"
@@ -11,8 +11,8 @@ last_updated: "2025-07-14"
 
 # Config Manager Design
 
-Goal: introduce a `ConfigManager` singleton so that config and base_dir don't need to be
-threaded as parameters through every function call.
+Goal: introduce a module-level config store so that `Config` doesn't need to be
+threaded as a parameter through every function call.
 
 ---
 
@@ -53,7 +53,7 @@ problem there. The issue is `base_dir` and `common` config being passed everywhe
 
 ### Module-level config store
 
-A simple module with a private variable and two functions:
+A simple module with a private variable and three functions:
 
 ```python
 # nanochat/config/current.py
@@ -70,14 +70,13 @@ def get() -> Config:
         raise RuntimeError("Config not initialized — call config.current.init() first")
     return _config
 
-def base_dir() -> str:
-    return get().common.base_dir
-
 def reset() -> None:
     """For testing."""
     global _config
     _config = None
 ```
+
+No convenience accessors for `base_dir` or paths — that's the [workspace module's](workspace-design.md) responsibility.
 
 ### Initialization
 
@@ -108,51 +107,35 @@ def get_tokenizer() -> RustBPETokenizer:
 
 ### Phase 1 — Add `config/current.py`, keep existing signatures
 
-- Add `config/current.py` with `init`, `get`, `base_dir`, `reset`
+- Add `config/current.py` with `init`, `get`, `reset`
 - Initialize it in CLI entry point
 - Don't change any function signatures yet
 
-### Phase 2 — Migrate leaf functions
+### Phase 2 — Migrate functions that receive `config` just to pass it through
 
-Start with functions that only need `base_dir`:
-
-| Module | Functions |
-|---|---|
-| `tokenizer/utils.py` | `get_tokenizer`, `get_token_bytes` |
-| `dataset/utils.py` | `list_parquet_files`, `parquets_iter_batched` |
-| `common/paths.py` | `checkpoint_dir`, `eval_results_dir` |
-| `report/` | `get_report` |
-
-Remove `base_dir` parameter, use `current.base_dir()` internally.
-
-### Phase 3 — Migrate mid-level functions
-
-Functions that pass `base_dir` through to leaf functions:
+Functions that accept `Config` or `CommonConfig` only to forward it:
 
 | Module | Functions |
 |---|---|
-| `training/checkpoint.py` | `load_model_from_dir`, `build_model`, `load_optimizer_state` |
-| `training/dataloader.py` | data loader constructors |
-| `evaluation/core_benchmark.py` | `evaluate_core` |
-| `tasks/spellingbee.py` | `SpellingBee.__init__`, `SimpleSpelling.__init__` |
+| `common/wandb.py` | `init_wandb` (receives `CommonConfig`) |
 
-### Phase 4 — Clean up entry points
+### Phase 3 — Clean up entry points
 
 Training/eval entry points still receive `config` as an explicit parameter (clarity at
-the top level), but stop extracting `base_dir` as a local variable:
+the top level), but stop extracting config sections just to pass them down:
 
 ```python
 # Before
 def train_base(config: Config):
-    base_dir = config.common.base_dir
-    tokenizer = get_tokenizer(base_dir=base_dir)
-    token_bytes = get_token_bytes(base_dir=base_dir, device=device)
+    wandb_run = init_wandb(config.common, ...)
 
 # After
 def train_base(config: Config):
-    tokenizer = get_tokenizer()
-    token_bytes = get_token_bytes(device=device)
+    wandb_run = init_wandb(...)
 ```
+
+Note: `base_dir` parameter elimination is handled by the [workspace module](workspace-design.md),
+not by the config manager.
 
 ---
 
@@ -179,12 +162,13 @@ def test_something():
 
 ---
 
-## What NOT to put in ConfigManager
+## What NOT to put in config/current
 
 - **Runtime state** (step, loss, etc.) — that's `TrainingState`
 - **Device/dtype** — these are compute concerns, not config
 - **Model config** (`GPTConfig`) — this is per-model, not global
 - **Mutable config** — `Config` should be treated as frozen after `init()`
+- **Paths and directories** — that's the [workspace module](workspace-design.md)
 
 ---
 
@@ -206,6 +190,6 @@ The module-level store trades explicitness for ergonomics. The `reset()` functio
 ## Dependencies
 
 - Independent of other refactors — can be done at any time
-- Simplifies the [checkpoint manager](checkpoint-manager-design.md) (no `base_dir` parameter)
-- Simplifies the [dual-trainer architecture](dual-trainer-architecture.md) (trainer doesn't
-  need config passed in)
+- Prerequisite for the [workspace module](workspace-design.md) (workspace reads `base_dir` from config)
+- Together with workspace, simplifies the [checkpoint manager](checkpoint-manager-design.md)
+- Together with workspace, simplifies the [dual-trainer architecture](dual-trainer-architecture.md)

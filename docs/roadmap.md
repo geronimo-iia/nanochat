@@ -73,7 +73,8 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark, allowing the GPU to use more unified memory before falling back to CPU. Tested on d6 (10 steps): no measurable throughput improvement (~55,900–58,300 tok/sec vs baseline — but those numbers were with compile/NaN, so inconclusive). May help at larger depths where memory pressure is real.
 
-- **Config manager** — module-level config store (`config/current.py`) to eliminate `base_dir` / `config` parameter threading across 20+ functions. See [design](config-manager-design.md).
+- **Config manager** — module-level config store (`config/current.py`) to eliminate `config` parameter threading. See [design](config-manager-design.md).
+- **Workspace module** — evolve `common/paths.py` into a module-level store that reads `base_dir` from config, eliminating `base_dir` parameter threading across 20+ functions. See [design](workspace-design.md).
 - **Scheduler placement** — move scheduler functions from shared `schedulers.py` to co-located named functions in each training script. See [study](scheduler-placement-study.md).
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
 - **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
