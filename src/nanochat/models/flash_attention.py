@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import torch
 import torch.nn.functional as F
+from nanochat.common.dtype import get_compute_dtype
 
 
 # =============================================================================
@@ -65,7 +66,6 @@ def _use_fa3():
         _use_fa3_cached = False
     elif HAS_FA3:
         # FA3 Hopper kernels only support bf16 and fp8; fp16/fp32 must use SDPA fallback
-        from nanochat.common import get_compute_dtype
 
         _use_fa3_cached = get_compute_dtype() == torch.bfloat16
     else:

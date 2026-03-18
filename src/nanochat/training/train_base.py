@@ -39,7 +39,7 @@ from nanochat.common import (
     print0,
     print_banner,
 )
-from nanochat.common.flash_attention import HAS_FA3, _use_fa3
+from nanochat.models.flash_attention import HAS_FA3, _use_fa3
 from nanochat.config import Config
 from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine

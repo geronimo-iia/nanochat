@@ -34,7 +34,7 @@ from nanochat.common import (
     print0,
     print_banner,
 )
-from nanochat.common.flash_attention import HAS_FA3
+from nanochat.models.flash_attention import HAS_FA3
 from nanochat.config import Config
 from nanochat.evaluation.chat_eval import run_chat_eval
 from nanochat.evaluation.engine import Engine

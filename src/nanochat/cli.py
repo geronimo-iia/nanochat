@@ -20,7 +20,8 @@ Usage:
 # pyright: reportMissingParameterType=false
 import argparse
 
-from nanochat.chat import chat_cli, chat_web_server
+from nanochat.chat.chat_cli import chat_cli
+from nanochat.chat.chat_web import chat_web_server
 from nanochat.config import (
     Config,
     CommonConfig,
@@ -35,11 +36,15 @@ from nanochat.config import (
     init_config,
 )
 from nanochat import workspace
-from nanochat.dataset import climbmix_download
-from nanochat.evaluation import base_eval, chat_eval
-from nanochat.report import manage_report
-from nanochat.tokenizer import tokenizer_eval, tokenizer_train
-from nanochat.training import train_base, train_rl, train_sft
+from nanochat.dataset.climbmix import climbmix_download
+from nanochat.evaluation.base_eval import base_eval
+from nanochat.evaluation.chat_eval import chat_eval
+from nanochat.report.cli import manage_report
+from nanochat.tokenizer.eval import tokenizer_eval
+from nanochat.tokenizer.train import tokenizer_train
+from nanochat.training.train_base import train_base
+from nanochat.training.train_rl import train_rl
+from nanochat.training.train_sft import train_sft
 
 
 def _load(loader: ConfigLoader, ns: argparse.Namespace) -> Config:
