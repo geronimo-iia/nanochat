@@ -6,7 +6,7 @@ read_when:
   - Deciding what to implement next
   - Understanding scope and sequencing
 status: draft
-last_updated: "2026-06-15"
+last_updated: "2025-07-15"
 ---
 
 # nanochat Roadmap
@@ -20,6 +20,7 @@ last_updated: "2026-06-15"
 | [Phase 1 — Architecture Experiments](archive/phase-1-architecture-experiments.md) | 2026-02-19 | SwiGLU, MoE, MTP — all negative results                            |
 | [Phase 1.5.0 — Data Layout & Config](archive/phase-1.5.0-data-layout-config.md)   | 2026-03-14 | Config system, centralized paths, hierarchical dirs, Python 3.13   |
 | [Phase 1.5.1 — Bugfixes & Tooling](archive/phase-1.5.1-bugfixes-tooling.md)       | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb      |
+| Phase 2 — Codebase Refactor                                                       | 2025-07-15 | Config manager, workspace (phase 1), scheduler co-location, CLI cleanup, circular import fix |
 
 ## Active — Phase 1.5: Compression-Based Optimization
 
@@ -77,7 +78,7 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **Config manager** ✅ — `config/current.py` and `load_and_init` implemented. See [design](config-manager-design.md).
 - **Workspace module** ✅ Phase 1 — `workspace.py` implemented alongside `common/paths.py`. See [design](workspace-design.md).
-- **Scheduler placement** — move scheduler functions from shared `schedulers.py` to co-located named functions in each training script. See [study](scheduler-placement-study.md).
+- **Scheduler placement** ✅ — schedulers co-located in training scripts, `schedulers.py` deleted. See [study](archive/scheduler-placement-study.md).
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
 - **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
 - **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).

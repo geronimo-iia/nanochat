@@ -5,8 +5,8 @@ read_when:
   - Implementing or reviewing the config manager refactor
   - Adding new functions that need access to config
   - Understanding why config is passed explicitly everywhere
-status: draft
-last_updated: "2025-07-14"
+status: active
+last_updated: "2025-07-15"
 ---
 
 # Config Manager Design

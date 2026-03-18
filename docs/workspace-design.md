@@ -5,8 +5,8 @@ read_when:
   - Implementing or reviewing the workspace refactor
   - Adding new path functions or directory conventions
   - Understanding how paths.py evolves into the workspace module
-status: draft
-last_updated: "2025-07-14"
+status: active
+last_updated: "2025-07-15"
 ---
 
 # Workspace Design
