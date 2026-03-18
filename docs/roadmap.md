@@ -15,11 +15,11 @@ last_updated: "2025-07-15"
 
 | Phase                                                                             | Completed  | Summary                                                            |
 | --------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------ |
-| [Phase 0 — Optimizations](archive/phase-0-optimizations.md)                       | 2026-03-05 | FA3, FP8, ClimbMix (27% speedup), Muon, sliding window, auto batch |
+| Phase 0 — Optimizations                                                           | 2026-03-05 | FA3, FP8, ClimbMix (27% speedup), Muon, sliding window, auto batch |
 | Phase 0.5 — Modular Refactor                                                      | 2026-03-13 | src/nanochat/ layout, unified CLI, pyright strict, CI/CD           |
-| [Phase 1 — Architecture Experiments](archive/phase-1-architecture-experiments.md) | 2026-02-19 | SwiGLU, MoE, MTP — all negative results                            |
-| [Phase 1.5.0 — Data Layout & Config](archive/phase-1.5.0-data-layout-config.md)   | 2026-03-14 | Config system, centralized paths, hierarchical dirs, Python 3.13   |
-| [Phase 1.5.1 — Bugfixes & Tooling](archive/phase-1.5.1-bugfixes-tooling.md)       | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb      |
+| Phase 1 — Architecture Experiments                                                | 2026-02-19 | SwiGLU, MoE, MTP — all negative results                            |
+| Phase 1.5.0 — Data Layout & Config                                                | 2026-03-14 | Config system, centralized paths, hierarchical dirs, Python 3.13   |
+| Phase 1.5.1 — Bugfixes & Tooling                                                  | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb      |
 | Phase 2 — Codebase Refactor                                                       | 2025-07-15 | Config manager, workspace (phase 1), scheduler co-location, CLI cleanup, circular import fix |
 
 ## Active — Phase 1.5: Compression-Based Optimization
@@ -76,9 +76,9 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark, allowing the GPU to use more unified memory before falling back to CPU. Tested on d6 (10 steps): no measurable throughput improvement (~55,900–58,300 tok/sec vs baseline — but those numbers were with compile/NaN, so inconclusive). May help at larger depths where memory pressure is real.
 
-- **Config manager** ✅ — `config/current.py` and `load_and_init` implemented. See [design](archive/config-manager-design.md).
-- **Workspace module** ✅ All phases — `workspace.py` fully implemented, `common/paths.py` deleted, all `base_dir` threading removed. See [design](archive/workspace-design.md).
-- **Scheduler placement** ✅ — schedulers co-located in training scripts, `schedulers.py` deleted. See [study](archive/scheduler-placement-study.md).
+- **Config manager** ✅ — `config/current.py` and `load_and_init` implemented.
+- **Workspace module** ✅ All phases — `workspace.py` fully implemented, `common/paths.py` deleted, all `base_dir` threading removed.
+- **Scheduler placement** ✅ — schedulers co-located in training scripts, `schedulers.py` deleted.
 - **TrainingState refactor** — extract mutable training loop state into a dataclass, eliminate the closure in `train_base`. See [plan](training-state-refactor.md).
 - **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
 - **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).
