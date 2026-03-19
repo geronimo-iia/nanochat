@@ -6,7 +6,7 @@ read_when:
   - Adding a new checkpoint format (safetensors, numpy)
   - Understanding how checkpoints integrate with the dual-trainer architecture
 status: draft
-last_updated: "2025-07-14"
+last_updated: "2025-07-18"
 ---
 
 # Checkpoint Manager Design
@@ -42,36 +42,76 @@ behavior is baked into the I/O functions.
 
 ### 4. Caller builds metadata dict inline
 
-Each training script constructs its own metadata dict with different keys:
+Each training script constructs its own metadata dict with different keys — no schema,
+no validation, easy to silently drop a key.
 
-```python
-# train_base.py
-{"step": step, "val_bpb": val_bpb, "model_config": ..., "user_config": ...,
- "dataloader_state_dict": ..., "loop_state": {"min_val_bpb": ..., ...}}
+### 5. Checkpoint config scattered across training modes
 
-# train_sft.py
-{"step": step, "val_bpb": val_bpb, "model_config": ..., "user_config": ...}
-
-# train_rl.py
-{"model_config": model_config_kwargs}
-```
-
-No schema, no validation — easy to silently drop a key.
+`save_every`, `resume_from_step`, `model_tag` are duplicated across `TrainingConfig`,
+`SFTConfig`, `RLConfig`, and `EvaluationConfig` with no single source of truth.
 
 ---
 
-## Design
+## Config changes
 
-### CheckpointManager protocol
+### `CommonConfig` — add `model_tag`
+
+`model_tag` identifies which model to load. It is used by training, evaluation, and chat
+alike — it belongs in `CommonConfig`, not duplicated per training mode.
+
+```toml
+[common]
+model_tag = ""   # empty = auto-detect largest model
+```
+
+Remove `model_tag` from `TrainingConfig`, `SFTConfig`, `RLConfig`, `EvaluationConfig`.
+
+### New `CheckpointConfig` section
+
+```toml
+[checkpoint]
+format = "torch"        # torch | safetensors | numpy  (default: torch)
+save_every = -1         # steps between saves, -1 = only at end
+resume_from_step = -1   # step to resume from, -1 = disabled
+keep_last_n = -1        # number of checkpoints to retain, -1 = keep all
+```
+
+`save_every` and `resume_from_step` are moved from `TrainingConfig`, `SFTConfig`, `RLConfig`.
+`keep_last_n` is new — the manager prunes old checkpoint files after each save.
+
+---
+
+## Protocols
+
+### `CheckpointStateProtocol`
+
+Declares that a state class supports checkpoint serialization. All `xxxState` classes
+satisfy this protocol.
+
+```python
+class CheckpointStateProtocol(Protocol):
+    step: int
+
+    @classmethod
+    def fresh(cls) -> Self: ...
+
+    def to_metadata(self) -> CheckpointMetadata: ...
+
+    @classmethod
+    def from_metadata(cls, meta: CheckpointMetadata) -> Self: ...
+```
+
+### `CheckpointManager` protocol
+
+The manager only knows `CheckpointMetadata` — never concrete state types.
 
 ```python
 class CheckpointManager(Protocol):
     def save(
         self,
-        step: int,
+        state: CheckpointStateProtocol,
         model_state: dict[str, Any],
         optimizer_state: dict[str, Any] | None,
-        metadata: CheckpointMetadata,
         rank: int = 0,
     ) -> None: ...
 
@@ -88,9 +128,27 @@ class CheckpointManager(Protocol):
     def exists(self, step: int) -> bool: ...
 ```
 
-### Checkpoint dataclass
+### `CheckpointLogger` protocol
 
-Returned by `load`, bundles everything together:
+Decouples logging from I/O:
+
+```python
+class CheckpointLogger(Protocol):
+    def info(self, message: str) -> None: ...
+    def warning(self, message: str) -> None: ...
+```
+
+Two implementations:
+- `RankZeroLogger` — logs only on rank 0 (current behavior, uses `logging`)
+- `SilentLogger` — no-op (for testing)
+
+---
+
+## Data classes
+
+### `Checkpoint`
+
+Returned by `manager.load()`, bundles everything together:
 
 ```python
 @dataclass
@@ -101,9 +159,10 @@ class Checkpoint:
     metadata: CheckpointMetadata
 ```
 
-### CheckpointMetadata dataclass
+### `CheckpointMetadata`
 
-Typed schema for the metadata JSON — replaces the ad-hoc dicts:
+Typed schema for the metadata JSON — replaces the ad-hoc dicts. Owned by the manager,
+populated via `state.to_metadata()`.
 
 ```python
 @dataclass
@@ -121,7 +180,9 @@ class CheckpointMetadata:
     def from_dict(cls, d: dict) -> Self: ...
 ```
 
-`LoopState` is the subset that `TrainingState.to_checkpoint()` produces:
+### `LoopState`
+
+The loop-specific slice of metadata, produced by `PretrainingState.to_metadata()`:
 
 ```python
 @dataclass
@@ -131,25 +192,64 @@ class LoopState:
     total_training_time: float
 ```
 
-### CheckpointLogger protocol
+---
 
-Decouples logging from I/O:
+## State class changes
+
+All `xxxState` classes replace `to_checkpoint()`/`from_checkpoint()` with
+`to_metadata()`/`from_metadata()` to satisfy `CheckpointStateProtocol`.
+
+### `PretrainingState`
 
 ```python
-class CheckpointLogger(Protocol):
-    def info(self, message: str) -> None: ...
-    def warning(self, message: str) -> None: ...
+def to_metadata(self) -> CheckpointMetadata:
+    return CheckpointMetadata(
+        step=self.step,
+        model_config=...,   # passed in from setup
+        user_config=...,
+        val_bpb=self.val_bpb,
+        loop_state=LoopState(
+            min_val_bpb=self.min_val_bpb,
+            smooth_train_loss=self.smooth_train_loss,
+            total_training_time=self.total_training_time,
+        ),
+        dataloader_state_dict=self.dataloader_state_dict,
+    )
+
+@classmethod
+def from_metadata(cls, meta: CheckpointMetadata) -> Self:
+    loop = meta.loop_state
+    return cls(
+        step=meta.step,
+        val_bpb=meta.val_bpb,
+        min_val_bpb=loop.min_val_bpb if loop else float("inf"),
+        smooth_train_loss=loop.smooth_train_loss if loop else 0.0,
+        total_training_time=loop.total_training_time if loop else 0.0,
+        dataloader_state_dict=meta.dataloader_state_dict,
+    )
 ```
 
-Two implementations:
-- `RankZeroLogger` — logs only on rank 0 (current behavior, uses `logging`)
-- `SilentLogger` — no-op (for testing)
+`SFTState` and `RLState` follow the same pattern with their respective fields.
+
+---
+
+## Manager factory
+
+A factory function reads `CheckpointConfig.format` and returns the right implementation:
+
+```python
+def make_checkpoint_manager(
+    checkpoint_dir: str,
+    config: CheckpointConfig,
+    logger: CheckpointLogger | None = None,
+) -> CheckpointManager: ...
+```
 
 ---
 
 ## Implementations
 
-### TorchCheckpointManager
+### `TorchCheckpointManager`
 
 Current behavior, extracted into the protocol:
 
@@ -157,16 +257,17 @@ Current behavior, extracted into the protocol:
 - `load`: `torch.load` + `json.load`
 - `find_last_step`: glob `model_*.pt`
 - Handles `_orig_mod.` prefix stripping, dtype conversion for CPU/MPS
+- `keep_last_n`: prunes oldest `model_*.pt` + `optim_*.pt` + `meta_*.json` after save
 
-### SafetensorsCheckpointManager
+### `SafetensorsCheckpointManager`
 
 For cross-backend interop (dual-trainer):
 
 - `save`: `safetensors.torch.save_file` for model, `json.dump` for metadata
 - `load`: `safetensors.torch.load_file` or `mx.load` depending on caller
-- Same directory layout, different file extension (`.safetensors` instead of `.pt`)
+- Same directory layout, `.safetensors` extension instead of `.pt`
 
-### NumpyCheckpointManager
+### `NumpyCheckpointManager`
 
 Minimal, for testing and simple interop:
 
@@ -179,101 +280,146 @@ Minimal, for testing and simple interop:
 
 ### Model construction
 
-`build_model` (constructing a `GPT` from config + state_dict) stays separate. The manager
-only handles serialization — it returns raw state dicts, not model instances. Model
-construction belongs in a factory or the trainer itself.
+`build_model` stays separate — the manager returns raw state dicts, not model instances.
+Model construction lives in `src/nanochat/model_factory.py` — a top-level utility used by
+`training/`, `evaluation/`, and `chat/` alike. Keeping it outside `training/checkpoint/`
+avoids a cross-package dependency from `chat/` and `evaluation/` into a training sub-package.
 
 ### Directory discovery
 
-`find_largest_model` (scanning phase dirs for model tags) stays as a standalone utility.
-It's about directory layout, not checkpoint format.
+`find_largest_model` stays as a standalone utility — it's about directory layout, not
+checkpoint format.
 
 ### Backward compatibility patching
 
 `_patch_missing_config_keys` and `_patch_missing_keys` stay as standalone functions.
-They're called after loading, before model construction — not the manager's concern.
+Called after loading, before model construction — not the manager's concern.
 
 ---
 
 ## File layout
 
 ```
-src/nanochat/training/
+src/nanochat/
+├── model_factory.py             # build_model, load_model_from_dir, load_model
+│                                #   used by training/, evaluation/, chat/
 ├── checkpoint/
-│   ├── __init__.py              # re-exports
-│   ├── protocol.py              # CheckpointManager protocol, Checkpoint, CheckpointMetadata
+│   ├── __init__.py              # re-exports: make_checkpoint_manager, CheckpointManager,
+│   │                            #   Checkpoint, CheckpointMetadata, CheckpointStateProtocol
+│   ├── protocol.py              # CheckpointManager, CheckpointStateProtocol,
+│   │                            #   Checkpoint, CheckpointMetadata, LoopState
 │   ├── torch_manager.py         # TorchCheckpointManager
 │   ├── safetensors_manager.py   # SafetensorsCheckpointManager (future)
 │   ├── logger.py                # CheckpointLogger, RankZeroLogger, SilentLogger
+│   ├── factory.py               # make_checkpoint_manager
 │   ├── discovery.py             # find_largest_model, find_last_step
-│   ├── compat.py                # _patch_missing_config_keys, _patch_missing_keys
-│   └── model_builder.py         # build_model, load_model_from_dir
+│   └── compat.py                # _patch_missing_config_keys, _patch_missing_keys
+├── training/
+│   └── ...
 ```
 
 ---
 
 ## Usage
 
-### Training loop (train_base.py)
+### Training loop
 
 ```python
-ckpt_dir = workspace.checkpoint_dir("base", model_tag)
-manager = TorchCheckpointManager(ckpt_dir, logger=RankZeroLogger())
+manager = make_checkpoint_manager(
+    checkpoint_dir=workspace.checkpoint_dir("base", config.common.model_tag),
+    config=config.checkpoint,
+    logger=RankZeroLogger(),
+)
 
 # Resume
-if resuming:
-    ckpt = manager.load(step=resume_step, device=device, load_optimizer=True, rank=ddp_rank)
+if config.checkpoint.resume_from_step > 0:
+    ckpt = manager.load(step=config.checkpoint.resume_from_step, device=device, load_optimizer=True, rank=ddp_rank)
     model.load_state_dict(ckpt.model_state)
     optimizer.load_state_dict(ckpt.optimizer_state)
-    state = PretrainingState.from_checkpoint(ckpt.metadata)
+    state = PretrainingState.from_metadata(ckpt.metadata)
+else:
+    state = PretrainingState.fresh()
 
 # Save
-manager.save(
-    step=state.step,
-    model_state=orig_model.state_dict(),
-    optimizer_state=optimizer.state_dict(),
-    metadata=CheckpointMetadata(
-        step=state.step,
-        model_config=model_config_kwargs,
-        user_config=user_config,
-        val_bpb=state.val_bpb,
-        loop_state=state.to_loop_state(),
-        dataloader_state_dict=state.dataloader_state_dict,
-    ),
-    rank=ddp_rank,
-)
+manager.save(state, orig_model.state_dict(), optimizer.state_dict(), rank=ddp_rank)
 ```
 
 ### Dual-trainer checkpoint handoff
 
 ```python
 # Train with MLX, save as safetensors
-mlx_manager = SafetensorsCheckpointManager(ckpt_dir)
-mlx_manager.save(step=step, model_state=trainer.state_dict(), ...)
+mlx_manager = make_checkpoint_manager(ckpt_dir, CheckpointConfig(format="safetensors"))
+mlx_manager.save(state, trainer.state_dict(), None)
 
 # Load in PyTorch for SFT
-torch_manager = SafetensorsCheckpointManager(ckpt_dir)
+torch_manager = make_checkpoint_manager(ckpt_dir, CheckpointConfig(format="safetensors"))
 ckpt = torch_manager.load(step=step, device=device)
 model.load_state_dict(ckpt.model_state)
+state = SFTState.from_metadata(ckpt.metadata)
 ```
 
 ---
 
+## Implementation notes
+
+### Python 3.12 type annotations
+
+All files use Python 3.12 native annotations. No `from __future__ import annotations`, no
+`typing.Optional`, no `typing.Union`. Use `X | Y`, `X | None`, `list[X]`, `dict[K, V]`
+directly. `Callable` and `Generator` from `collections.abc`, not `typing`.
+
+### No dynamic imports
+
+`factory.py` selects the manager implementation at call time but uses static imports at
+the top of the module — no `importlib`, no `__import__`, no inline `import` statements.
+
+```python
+# correct
+from nanochat.checkpoint.torch_manager import TorchCheckpointManager
+from nanochat.checkpoint.safetensors_manager import SafetensorsCheckpointManager
+
+def make_checkpoint_manager(checkpoint_dir: str, config: CheckpointConfig, ...) -> CheckpointManager:
+    if config.format == "safetensors":
+        return SafetensorsCheckpointManager(checkpoint_dir, ...)
+    return TorchCheckpointManager(checkpoint_dir, ...)
+```
+
+### Tests
+
+All new modules get unit tests under `tests/test_checkpoint/`.
+
+| Test file                  | Coverage                                                              |
+| -------------------------- | --------------------------------------------------------------------- |
+| `test_protocol.py`         | `CheckpointMetadata.to_dict()` / `from_dict()` round-trip, `LoopState` |
+| `test_torch_manager.py`    | save/load round-trip, `keep_last_n` pruning, `find_last_step`, `exists()` |
+| `test_factory.py`          | `make_checkpoint_manager` returns correct type per `format`           |
+| `test_discovery.py`        | `find_largest_model`, `find_last_step`                                |
+| `test_compat.py`           | `_patch_missing_config_keys`, `_patch_missing_keys`                   |
+| `test_model_factory.py`    | `build_model` round-trip with a tiny GPT config                       |
+
+Existing `tests/test_training/test_checkpoint.py` updated to cover the new API.
+`SilentLogger` used throughout tests — no real logging.
+
 ## Implementation order
 
-1. Define `protocol.py` — `CheckpointManager`, `Checkpoint`, `CheckpointMetadata`, `LoopState`
-2. Define `logger.py` — `CheckpointLogger`, `RankZeroLogger`, `SilentLogger`
-3. Extract `TorchCheckpointManager` from current `checkpoint.py`
-4. Extract `discovery.py`, `compat.py`, `model_builder.py` from current `checkpoint.py`
-5. Update all call sites (`train_base`, `train_sft`, `train_rl`, `base_eval`, `chat_eval`)
-6. Delete old `checkpoint.py`
-7. Add `SafetensorsCheckpointManager` when dual-trainer lands
+1. Add `CheckpointConfig` to `config/` — `format`, `save_every`, `resume_from_step`, `keep_last_n`
+2. Move `model_tag` to `CommonConfig`, remove from `TrainingConfig`, `SFTConfig`, `RLConfig`, `EvaluationConfig`
+3. Define `protocol.py` — `CheckpointStateProtocol`, `CheckpointManager`, `Checkpoint`, `CheckpointMetadata`, `LoopState`
+4. Define `logger.py` — `CheckpointLogger`, `RankZeroLogger`, `SilentLogger`
+5. Implement `TorchCheckpointManager` in `torch_manager.py`
+6. Implement `factory.py` — `make_checkpoint_manager`
+7. Extract `discovery.py`, `compat.py` from current `checkpoint.py`; promote model construction to `src/nanochat/model_factory.py`; move entire package to `src/nanochat/checkpoint/`
+8. Update state classes — `to_metadata()` / `from_metadata()` replacing `to_checkpoint()` / `from_checkpoint()`
+9. Update all call sites (`training/base/`, `training/sft/`, `training/rl/`, `evaluation/base/`, `evaluation/chat/`)
+10. Delete old `checkpoint.py`
+11. Add `SafetensorsCheckpointManager` when dual-trainer lands
 
 ---
 
 ## Dependencies
 
-- Requires [TrainingState refactor](training-state-refactor.md) for `LoopState` / `to_loop_state()`
-- Benefits from [workspace module](workspace-design.md) — `workspace.checkpoint_dir()` replaces `checkpoint_dir(base_dir, ...)` threading
+- Entry point refactor ✅ — state classes (`PretrainingState`, `SFTState`, `RLState`) already exist
+- Workspace module ✅ — `workspace.checkpoint_dir()` already in place
+- `nanochat/checkpoint/` imports only from `common/`, `config/`, `workspace` — no dependency on `training/` or `evaluation/`
+- `training/`, `evaluation/`, `chat/` all import from `nanochat/checkpoint/` and `nanochat/model_factory`
 - Enables [dual-trainer architecture](dual-trainer-architecture.md) checkpoint interop
-- Independent of [scheduler placement](scheduler-placement-study.md)
