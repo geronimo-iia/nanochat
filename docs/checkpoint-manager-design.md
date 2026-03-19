@@ -402,17 +402,68 @@ Existing `tests/test_training/test_checkpoint.py` updated to cover the new API.
 
 ## Implementation order
 
-1. Add `CheckpointConfig` to `config/` — `format`, `save_every`, `resume_from_step`, `keep_last_n`
-2. Move `model_tag` to `CommonConfig`, remove from `TrainingConfig`, `SFTConfig`, `RLConfig`, `EvaluationConfig`
-3. Define `protocol.py` — `CheckpointStateProtocol`, `CheckpointManager`, `Checkpoint`, `CheckpointMetadata`, `LoopState`
-4. Define `logger.py` — `CheckpointLogger`, `RankZeroLogger`, `SilentLogger`
-5. Implement `TorchCheckpointManager` in `torch_manager.py`
-6. Implement `factory.py` — `make_checkpoint_manager`
-7. Extract `discovery.py`, `compat.py` from current `checkpoint.py`; promote model construction to `src/nanochat/model_factory.py`; move entire package to `src/nanochat/checkpoint/`
-8. Update state classes — `to_metadata()` / `from_metadata()` replacing `to_checkpoint()` / `from_checkpoint()`
-9. Update all call sites (`training/base/`, `training/sft/`, `training/rl/`, `evaluation/base/`, `evaluation/chat/`)
-10. Delete old `checkpoint.py`
-11. Add `SafetensorsCheckpointManager` when dual-trainer lands
+### Step 1 — Config changes
+
+- Create `src/nanochat/config/checkpoint.py` — `CheckpointConfig` with `format`, `save_every`, `resume_from_step`, `keep_last_n`
+- `common.py` — add `model_tag: str | None`; drop `from __future__`, `Optional` → `| None`
+- `training.py` — remove `model_tag`, `save_every`, `resume_from_step`; fix annotations
+- `sft.py` — remove `model_tag`; rename `model_step` → `source_step`; fix annotations
+- `rl.py` — remove `model_tag`, `save_every`; rename `model_step` → `source_step`; fix annotations
+- `evaluation.py` — remove `model_tag`; fix annotations
+- `config.py` — add `checkpoint: CheckpointConfig`, register in `SECTION_CLS`; fix annotations
+- `loader.py` — add `add_checkpoint()`; fix annotations
+- `__init__.py` — export `CheckpointConfig`
+
+### Step 2 — `src/nanochat/checkpoint/` package
+
+- `protocol.py` — `CheckpointStateProtocol`, `CheckpointManager`, `Checkpoint`, `CheckpointMetadata`, `LoopState`
+- `logger.py` — `CheckpointLogger`, `RankZeroLogger`, `SilentLogger`
+- `torch_manager.py` — `TorchCheckpointManager`
+- `factory.py` — `make_checkpoint_manager`
+- `discovery.py` — `find_largest_model`, `find_last_step`
+- `compat.py` — `_patch_missing_config_keys`, `_patch_missing_keys`
+- `__init__.py` — re-exports
+
+### Step 3 — `src/nanochat/model_factory.py`
+
+- Promote `build_model`, `load_model_from_dir`, `load_model`, `load_optimizer_state` from `training/checkpoint.py`
+- Update all callers: `chat/`, `evaluation/base/`, `evaluation/chat/`, `training/sft/`, `training/rl/`
+
+### Step 4 — Update state classes
+
+- `training/base/state.py` — `to_checkpoint()` → `to_metadata()`, `from_checkpoint()` → `from_metadata()`; satisfy `CheckpointStateProtocol`
+- `training/sft/state.py` — same
+- `training/rl/state.py` — same
+
+### Step 5 — Update training loops
+
+- `training/base/loop.py` — use `make_checkpoint_manager`, `state.to_metadata()`, `State.from_metadata()`; read `save_every`/`resume_from_step` from `config.checkpoint`
+- `training/sft/loop.py` — same; read `source_step` from `config.sft`
+- `training/rl/loop.py` — same; read `source_step` from `config.rl`
+
+### Step 6 — Update evaluation and chat
+
+- `evaluation/base/loop.py` — use `model_factory` and `config.common.model_tag`
+- `evaluation/chat/loop.py` — same
+- `chat/chat_cli.py` — use `model_factory` and `config.common.model_tag`
+- `chat/server/worker_pool.py` — same
+
+### Step 7 — Delete `training/checkpoint.py`
+
+- Verify no remaining imports, then delete
+
+### Step 8 — Tests
+
+- Create `tests/test_checkpoint/` with `test_protocol.py`, `test_torch_manager.py`, `test_factory.py`, `test_discovery.py`, `test_compat.py`
+- Create `tests/test_model_factory.py`
+- Update `tests/test_training/test_checkpoint.py` to cover new API
+- Update `tests/test_config/` for `CheckpointConfig`, `model_tag` in `CommonConfig`, `source_step` rename
+
+### Step 9 — Docs
+
+- `docs/code-structure.md` — add `checkpoint/` and `model_factory.py` to package map and dependency rules
+- `docs/roadmap.md` — move checkpoint manager from deferred to completed
+- `CHANGELOG.md` — add unreleased entry
 
 ---
 

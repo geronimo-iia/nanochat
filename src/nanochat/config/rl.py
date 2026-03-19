@@ -1,18 +1,14 @@
 """Config for reinforcement learning (RLHF/GRPO) fine-tuning."""
 
-from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class RLConfig:
     @classmethod
     def update_parser(cls, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--model-tag", type=str, default=argparse.SUPPRESS)
-        parser.add_argument("--model-step", type=int, default=argparse.SUPPRESS)
+        parser.add_argument("--source-step", type=int, default=argparse.SUPPRESS)
         parser.add_argument("--num-epochs", type=int, default=argparse.SUPPRESS)
         parser.add_argument("--device-batch-size", type=int, default=argparse.SUPPRESS)
         parser.add_argument("--examples-per-step", type=int, default=argparse.SUPPRESS)
@@ -27,13 +23,11 @@ class RLConfig:
         parser.add_argument("--init-lr-frac", type=float, default=argparse.SUPPRESS)
         parser.add_argument("--eval-every", type=int, default=argparse.SUPPRESS)
         parser.add_argument("--eval-examples", type=int, default=argparse.SUPPRESS)
-        parser.add_argument("--save-every", type=int, default=argparse.SUPPRESS)
 
     @classmethod
     def generate_default(cls) -> str:
         return (
-            '# model_tag = ""           # empty = auto\n'
-            "# model_step = -1          # -1 = last checkpoint\n"
+            "# source_step = -1         # -1 = last checkpoint\n"
             "num_epochs = 1\n"
             "device_batch_size = 8\n"
             "examples_per_step = 16\n"
@@ -48,11 +42,9 @@ class RLConfig:
             "init_lr_frac = 0.05\n"
             "eval_every = 60\n"
             "eval_examples = 400\n"
-            "save_every = 60\n"
         )
 
-    model_tag: Optional[str] = None
-    model_step: Optional[int] = None
+    source_step: int | None = None
     num_epochs: int = 1
     device_batch_size: int = 8
     examples_per_step: int = 16
@@ -67,4 +59,3 @@ class RLConfig:
     init_lr_frac: float = 0.05
     eval_every: int = 60
     eval_examples: int = 400
-    save_every: int = 60

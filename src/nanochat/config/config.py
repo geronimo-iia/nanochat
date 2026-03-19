@@ -7,6 +7,7 @@ from pathlib import Path
 
 import tomli_w
 
+from nanochat.config.checkpoint import CheckpointConfig
 from nanochat.config.common import CommonConfig
 from nanochat.config.evaluation import EvaluationConfig
 from nanochat.config.rl import RLConfig
@@ -16,6 +17,7 @@ from nanochat.config.training import TrainingConfig
 
 SECTION_CLS: dict[str, type] = {
     "common": CommonConfig,
+    "checkpoint": CheckpointConfig,
     "training": TrainingConfig,
     "sft": SFTConfig,
     "rl": RLConfig,
@@ -27,6 +29,7 @@ SECTION_CLS: dict[str, type] = {
 @dataclass
 class Config:
     common: CommonConfig = field(default_factory=CommonConfig)
+    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     sft: SFTConfig = field(default_factory=SFTConfig)
     rl: RLConfig = field(default_factory=RLConfig)
@@ -56,6 +59,7 @@ class Config:
     def generate_default(cls) -> str:
         return (
             "[common]\n" + CommonConfig.generate_default() + "\n"
+            "[checkpoint]\n" + CheckpointConfig.generate_default() + "\n"
             "[training]\n" + TrainingConfig.generate_default() + "\n"
             "[sft]\n" + SFTConfig.generate_default() + "\n"
             "[rl]\n" + RLConfig.generate_default() + "\n"

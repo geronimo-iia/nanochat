@@ -32,14 +32,12 @@ def test_training_config_defaults():
     assert cfg.depth == 20
     assert cfg.aspect_ratio == 64
     assert cfg.fp8 is False
-    assert cfg.model_tag is None
 
 
 def test_sft_config_defaults():
     cfg = SFTConfig()
     assert cfg.load_optimizer is True
     assert cfg.num_iterations == -1
-    assert cfg.model_tag is None
 
 
 def test_rl_config_defaults():
@@ -158,9 +156,9 @@ def test_save_roundtrip(tmp_path):
 
 def test_save_omits_none_fields(tmp_path):
     cfg = Config()
-    assert cfg.training.model_tag is None
+    assert cfg.common.model_tag is None
     p = tmp_path / "config.toml"
     cfg.save(p)
     with open(p, "rb") as f:
         data = tomllib.load(f)
-    assert "model_tag" not in data["training"]
+    assert "model_tag" not in data["common"]

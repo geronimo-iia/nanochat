@@ -1,18 +1,14 @@
 """Config for supervised fine-tuning (SFT) on chat data."""
 
-from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class SFTConfig:
     @classmethod
     def update_parser(cls, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--model-tag", type=str, default=argparse.SUPPRESS)
-        parser.add_argument("--model-step", type=int, default=argparse.SUPPRESS)
+        parser.add_argument("--source-step", type=int, default=argparse.SUPPRESS)
         parser.add_argument("--load-optimizer", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
         parser.add_argument("--num-iterations", type=int, default=argparse.SUPPRESS, help="-1 = full epoch")
         parser.add_argument("--max-seq-len", type=int, default=argparse.SUPPRESS, help="None = inherit from pretrain")
@@ -36,8 +32,7 @@ class SFTConfig:
     @classmethod
     def generate_default(cls) -> str:
         return (
-            '# model_tag = ""           # empty = auto\n'
-            "# model_step = -1          # -1 = last checkpoint\n"
+            "# source_step = -1         # -1 = last checkpoint\n"
             "load_optimizer = true\n"
             "num_iterations = -1        # -1 = full epoch\n"
             "max_seq_len = 2048         # inherit from pretrain if checkpoint has it\n"
@@ -59,16 +54,15 @@ class SFTConfig:
             "gsm8k_epochs = 4\n"
         )
 
-    model_tag: Optional[str] = None
-    model_step: Optional[int] = None
+    source_step: int | None = None
     load_optimizer: bool = True
     num_iterations: int = -1
     max_seq_len: int = 2048
     device_batch_size: int = 32
     total_batch_size: int = 524288
-    embedding_lr: Optional[float] = None
-    unembedding_lr: Optional[float] = None
-    matrix_lr: Optional[float] = None
+    embedding_lr: float | None = None
+    unembedding_lr: float | None = None
+    matrix_lr: float | None = None
     init_lr_frac: float = 0.8
     warmup_ratio: float = 0.0
     warmdown_ratio: float = 0.5
