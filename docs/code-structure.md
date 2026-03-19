@@ -81,9 +81,9 @@ Training loops and supporting infrastructure.
 
 | Module                   | Responsibility                                                       |
 | ------------------------ | -------------------------------------------------------------------- |
-| `train_base.py`          | Base model pretraining loop                                          |
-| `train_sft.py`           | Supervised fine-tuning loop                                          |
-| `train_rl.py`            | GRPO reinforcement learning loop                                     |
+| `base/`                  | Base model pretraining — `PretrainingState`, setup, loop             |
+| `sft/`                   | Supervised fine-tuning — `SFTState`, dataloader, setup, loop         |
+| `rl/`                    | GRPO reinforcement learning — `RLState`, rollout, eval, loop         |
 | `optimizer.py`           | `MuonAdamW` and `DistMuonAdamW` optimizers                           |
 | `scaling.py`             | Scaling law utilities (compute-optimal step count, total batch size) |
 | `checkpoint.py`          | Save/load model, optimizer, and training metadata                    |
@@ -99,8 +99,8 @@ Model evaluation infrastructure.
 | `loss_eval.py`      | BPB (bits-per-byte) evaluation over validation shards |
 | `core_eval.py`      | Single-task evaluation runner                         |
 | `core_benchmark.py` | Multi-task CORE benchmark runner                      |
-| `chat_eval.py`      | Chat model evaluation entry point                     |
-| `base_eval.py`      | Base model evaluation entry point                     |
+| `base/`             | Base model evaluation — `BaseEvalResult`, loop        |
+| `chat/`             | Chat model evaluation — `ChatEvalResult`, loop        |
 | `hf_model.py`       | HuggingFace model wrapper for cross-model comparison  |
 
 ### `chat/`
@@ -124,12 +124,13 @@ nanochat train base --depth 12
   └── cli.main()
         └── ConfigLoader().add_training().resolve(args) → Config
               └── current.init(config) + workspace.init()
-                    └── train_base(config)
-                          ├── compute_init()          # common/distributed.py
-                          ├── get_tokenizer()         # tokenizer/utils.py
-                          ├── GPT(GPTConfig(...))     # models/gpt.py
-                          ├── MuonAdamW(...)          # training/optimizer.py
-                          └── training loop
+                    └── train_base(config)           # training/base/__init__.py
+                          ├── setup(config)           # training/base/setup.py
+                          │     ├── compute_init()    # common/distributed.py
+                          │     ├── get_tokenizer()   # tokenizer/utils.py
+                          │     ├── GPT(GPTConfig())  # models/gpt.py
+                          │     └── MuonAdamW(...)    # training/optimizer.py
+                          └── train_loop(s)           # training/base/loop.py
                                 ├── evaluate_bpb()   # evaluation/loss_eval.py
                                 ├── evaluate_core()  # evaluation/core_benchmark.py
                                 └── save_checkpoint() # training/checkpoint.py
@@ -163,7 +164,7 @@ Engine(model, tokenizer, device)
 - `tasks/` imports only from `common/`
 - `tokenizer/` imports from `common/`, `workspace`
 - `dataset/` imports from `common/`, `workspace`
-- `training/` imports from `common/`, `workspace`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
-- `evaluation/` imports from `common/`, `workspace`, `models/`, `tokenizer/`, `tasks/`
+- `training/base/`, `training/sft/`, `training/rl/` import from `common/`, `workspace`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
+- `evaluation/base/`, `evaluation/chat/` import from `common/`, `workspace`, `models/`, `tokenizer/`, `tasks/`
 - `chat/` imports from `common/`, `config/`, `evaluation/`, `tokenizer/`
 - `cli.py` imports from all packages (top-level wiring only)

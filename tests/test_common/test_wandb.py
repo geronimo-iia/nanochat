@@ -30,17 +30,28 @@ def test_creates_output_dir(tmp_path):
 
 def test_log_writes_jsonl(tmp_path):
     w = LocalWandb(str(tmp_path), "test-run")
-    w.log({"step": 0, "loss": 1.5})
-    w.log({"step": 1, "loss": 1.2})
+    w.log({"loss": 1.5}, step=0)
+    w.log({"loss": 1.2}, step=1)
     w.finish()
 
     lines = (tmp_path / "runs" / "nanochat" / "test-run" / "wandb.jsonl").read_text().splitlines()
     assert len(lines) == 2
     entry0 = json.loads(lines[0])
     assert "timestamp" in entry0
-    assert entry0["data"] == {"step": 0, "loss": 1.5}
+    assert entry0["step"] == 0
+    assert entry0["data"] == {"loss": 1.5}
     entry1 = json.loads(lines[1])
-    assert entry1["data"] == {"step": 1, "loss": 1.2}
+    assert entry1["step"] == 1
+    assert entry1["data"] == {"loss": 1.2}
+
+
+def test_log_step_none_when_omitted(tmp_path):
+    w = LocalWandb(str(tmp_path), "test-run")
+    w.log({"loss": 1.0})
+    w.finish()
+
+    entry = json.loads((tmp_path / "runs" / "nanochat" / "test-run" / "wandb.jsonl").read_text())
+    assert entry["step"] is None
 
 
 def test_finish_closes_file(tmp_path):

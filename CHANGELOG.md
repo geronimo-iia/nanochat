@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `training/train_base.py`, `training/train_sft.py`, `training/train_rl.py` split into
+  `training/base/`, `training/sft/`, `training/rl/` sub-packages with co-located state dataclasses
+- `evaluation/base_eval.py`, `evaluation/chat_eval.py` split into
+  `evaluation/base/`, `evaluation/chat/` sub-packages
+- Mutable loop state extracted into `PretrainingState`, `SFTState`, `RLState`, `BaseEvalResult`, `ChatEvalResult`
+- `train_base` closure eliminated — loop promoted to module-level function
+- `train_sft` `nonlocal` hack eliminated — `SFTState` passed explicitly into dataloader
+- `cli.py` import paths updated to use new sub-packages
+
 ### Added
 
 - `workspace.py` — module-level path store replacing `common/paths.py`; initialized once at startup via `workspace.init()`, provides all path functions (`data_dir`, `tokenizer_dir`, `checkpoint_dir`, `eval_results_dir`, etc.) without `base_dir` parameter threading
