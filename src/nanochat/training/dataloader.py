@@ -23,9 +23,7 @@ from nanochat.common import get_dist_info
 from nanochat.dataset import list_parquet_files
 
 
-def _document_batches(
-    split: str, resume_state_dict: dict[str, object] | None, tokenizer_batch_size: int
-):
+def _document_batches(split: str, resume_state_dict: dict[str, object] | None, tokenizer_batch_size: int):
     """
     Infinite iterator over document batches (list of text strings) from parquet files.
 

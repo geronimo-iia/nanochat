@@ -6,21 +6,21 @@ read_when:
   - Deciding what to implement next
   - Understanding scope and sequencing
 status: draft
-last_updated: "2025-07-15"
+last_updated: "2025-07-18"
 ---
 
 # nanochat Roadmap
 
 ## Completed
 
-| Phase                                                                             | Completed  | Summary                                                            |
-| --------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------ |
-| Phase 0 — Optimizations                                                           | 2026-03-05 | FA3, FP8, ClimbMix (27% speedup), Muon, sliding window, auto batch |
-| Phase 0.5 — Modular Refactor                                                      | 2026-03-13 | src/nanochat/ layout, unified CLI, pyright strict, CI/CD           |
-| Phase 1 — Architecture Experiments                                                | 2026-02-19 | SwiGLU, MoE, MTP — all negative results                            |
-| Phase 1.5.0 — Data Layout & Config                                                | 2026-03-14 | Config system, centralized paths, hierarchical dirs, Python 3.13   |
-| Phase 1.5.1 — Bugfixes & Tooling                                                  | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb      |
-| Phase 2 — Codebase Refactor                                                       | 2025-07-15 | Config manager, workspace (phase 1), scheduler co-location, CLI cleanup, circular import fix |
+| Phase                                                | Completed  | Summary                                                                                      |
+| ---------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| Phase 0 — Optimizations                              | 2026-03-05 | FA3, FP8, ClimbMix (27% speedup), Muon, sliding window, auto batch                          |
+| Phase 0.5 — Modular Refactor                         | 2026-03-13 | src/nanochat/ layout, unified CLI, pyright strict, CI/CD                                     |
+| Phase 1 — Architecture Experiments                   | 2026-02-19 | SwiGLU, MoE, MTP — all negative results                                                     |
+| Phase 1.5.0 — Data Layout & Config                   | 2026-03-14 | Config system, centralized paths, hierarchical dirs, Python 3.13                             |
+| Phase 1.5.1 — Bugfixes & Tooling                     | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb                               |
+| Phase 2 — Codebase Refactor                          | 2025-07-15 | Config manager, workspace, scheduler co-location, entry point sub-packages, CLI cleanup      |
 
 ## Active — Phase 1.5: Compression-Based Optimization
 
@@ -72,15 +72,12 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **`torch.compile` on MPS causes NaN gradients** — confirmed on PyTorch 2.9.1, M3 Max. The inductor backend is not supported on MPS. During gradient accumulation, every forward pass after the first backward produces NaN loss. Fixed by skipping `torch.compile` when `device_type == "mps"`. Cost: ~2.4× slower (~24k vs ~58k tok/sec at d6). See [m3-max-guide](m3-max-guide.md) for details.
 
-- **`autocast` in the hot-path forward** — added. The normal training path now wraps `model(x, y)` in `torch.amp.autocast(device_type=device_type, dtype=get_compute_dtype())`, consistent with the compression-tracking branch.
+- **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark, allowing the GPU to use more unified memory before falling back to CPU. Tested on d6 (10 steps): no measurable throughput improvement. May help at larger depths where memory pressure is real.
 
-- **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark, allowing the GPU to use more unified memory before falling back to CPU. Tested on d6 (10 steps): no measurable throughput improvement (~55,900–58,300 tok/sec vs baseline — but those numbers were with compile/NaN, so inconclusive). May help at larger depths where memory pressure is real.
-
-- **Config manager** ✅ — `config/current.py` and `load_and_init` implemented.
-- **Workspace module** ✅ All phases — `workspace.py` fully implemented, `common/paths.py` deleted, all `base_dir` threading removed.
-- **Scheduler placement** ✅ — schedulers co-located in training scripts, `schedulers.py` deleted.
-- **Entry point refactor** — split `train_base.py`, `train_sft.py`, `train_rl.py`, `base_eval.py`, `chat_eval.py` into sub-packages with co-located state dataclasses. See [plan](entry-point-refactor.md).
-- **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
-- **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).
-- **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint.py`. Document in quickstart guide.
 - **MPS fp16 vs fp32 loss curves** — `GradScaler(device='mps')` works natively on Apple Silicon. A d8 comparison run (fp16 vs fp32) would confirm whether fp16 training is numerically stable in practice.
+
+- **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint.py`.
+
+- **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
+
+- **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).

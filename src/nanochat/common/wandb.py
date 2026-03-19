@@ -4,9 +4,17 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Protocol, runtime_checkable
 
 from nanochat.config import current
+
+
+@runtime_checkable
+class WandbProtocol(Protocol):
+    """Structural interface satisfied by DummyWandb, LocalWandb, and wandb.Run."""
+
+    def log(self, data: dict[str, Any], step: int | None = None, commit: bool | None = None) -> None: ...
+    def finish(self) -> None: ...
 
 
 class DummyWandb:
@@ -15,10 +23,10 @@ class DummyWandb:
     def __init__(self):
         pass
 
-    def log(self, *args: object, **kwargs: object) -> None:
+    def log(self, data: dict[str, Any], step: int | None = None, commit: bool | None = None) -> None:
         pass
 
-    def finish(self):
+    def finish(self) -> None:
         pass
 
 
@@ -32,11 +40,11 @@ class LocalWandb(DummyWandb):
         os.makedirs(log_dir, exist_ok=True)
         self._f = open(log_dir / "wandb.jsonl", "a")
 
-    def log(self, data: dict[str, Any], *args: object, **kwargs: object) -> None:
-        self._f.write(json.dumps({"timestamp": time.time(), "data": data}) + "\n")
+    def log(self, data: dict[str, Any], step: int | None = None, commit: bool | None = None) -> None:
+        self._f.write(json.dumps({"timestamp": time.time(), "step": step, "data": data}) + "\n")
         self._f.flush()
 
-    def finish(self):
+    def finish(self) -> None:
         self._f.close()
 
 
@@ -44,7 +52,7 @@ def init_wandb(
     user_config: dict[str, Any],
     master_process: bool,
     project_suffix: str | None = None,
-) -> Union[DummyWandb, LocalWandb, object]:
+) -> WandbProtocol:
     """Unified wandb initialisation. Reads common config from current.get().
 
     Resolution order:
