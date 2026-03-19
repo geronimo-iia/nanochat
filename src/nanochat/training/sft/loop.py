@@ -4,17 +4,18 @@ import time
 import torch
 import torch.distributed as dist
 
+from nanochat.checkpoint import make_checkpoint_manager
 from nanochat.common import is_ddp_initialized, print0
 from nanochat.evaluation.chat_eval import run_chat_eval
 from nanochat.evaluation.engine import Engine
 from nanochat.evaluation.loss_eval import evaluate_bpb
 from nanochat.report import get_report
-from nanochat.training.checkpoint import save_checkpoint
 from nanochat.training.sft.setup import SFTTrainingSetup
 
 
 def sft_train_loop(s: SFTTrainingSetup) -> None:
     """Run the SFT training loop. Mutates s.state in place."""
+    checkpoint_manager = make_checkpoint_manager(s.ckpt_dir, s.config.checkpoint)
     x, y = next(s.train_loader)  # type: ignore[call-overload]
 
     while True:
@@ -104,12 +105,10 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
 
         # Checkpoint — SFT only saves at last_step
         if state.last_step:
-            save_checkpoint(
-                s.ckpt_dir,
-                state.step,
+            checkpoint_manager.save(
+                state,
                 s.orig_model.state_dict(),  # type: ignore[union-attr]
                 s.optimizer.state_dict(),  # type: ignore[union-attr]
-                state.to_checkpoint(s.model_config, s.user_config),
                 rank=s.ddp_rank,
             )
 

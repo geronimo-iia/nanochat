@@ -259,17 +259,17 @@ def setup(config: Config) -> BaseTrainingSetup:
     model.to_empty(device=device)
     model.init_weights()
 
-    output_dirname = config.training.model_tag if config.training.model_tag else f"d{config.training.depth}"
+    output_dirname = config.common.model_tag if config.common.model_tag else f"d{config.training.depth}"
     ckpt_dir = workspace.checkpoint_dir("base", output_dirname)
     config.save(Path(ckpt_dir) / "config.toml")
 
-    resuming = config.training.resume_from_step != -1
+    resuming = config.checkpoint.resume_from_step != -1
     optimizer_data: dict[str, object] | None = None
     meta_data: dict[str, object] | None = None
     if resuming:
-        print0(f"Resuming optimization from step {config.training.resume_from_step}")
+        print0(f"Resuming optimization from step {config.checkpoint.resume_from_step}")
         model_data, optimizer_data, meta_data = load_checkpoint(
-            ckpt_dir, config.training.resume_from_step, device, load_optimizer=True, rank=ddp_rank
+            ckpt_dir, config.checkpoint.resume_from_step, device, load_optimizer=True, rank=ddp_rank
         )
         model.load_state_dict(model_data, strict=True, assign=True)
         del model_data
@@ -394,6 +394,13 @@ def setup(config: Config) -> BaseTrainingSetup:
     else:
         assert meta_data is not None
         state = PretrainingState.from_checkpoint(meta_data)
+    state.model_config = model_config_kwargs
+    state.user_config = {
+        **user_config,
+        "device_batch_size": config.training.device_batch_size,
+        "max_seq_len": config.training.max_seq_len,
+        "total_batch_size": total_batch_size,
+    }
 
     return BaseTrainingSetup(
         config=config,
