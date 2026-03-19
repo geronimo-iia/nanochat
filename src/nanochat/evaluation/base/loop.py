@@ -11,7 +11,7 @@ from nanochat.evaluation.hf_model import get_hf_token_bytes, load_hf_model
 from nanochat.evaluation.loss_eval import evaluate_bpb
 from nanochat.report import get_report
 from nanochat.tokenizer import get_token_bytes
-from nanochat.training.checkpoint import load_model_from_dir
+from nanochat.model_factory import load_model_from_dir
 from nanochat.training.dataloader import tokenizing_distributed_data_loader_bos_bestfit
 
 

@@ -16,7 +16,7 @@ from nanochat.tasks.gsm8k import GSM8K
 from nanochat.tasks.humaneval import HumanEval
 from nanochat.tasks.mmlu import MMLU
 from nanochat.tasks.spellingbee import SpellingBee
-from nanochat.training.checkpoint import load_model_from_dir
+from nanochat.model_factory import load_model_from_dir
 
 
 def run_generative_eval(

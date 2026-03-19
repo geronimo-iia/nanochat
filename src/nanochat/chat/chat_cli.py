@@ -7,7 +7,7 @@ Intended to be run single GPU only atm.
 from nanochat.common import autodetect_device_type, compute_init
 from nanochat.config import Config
 from nanochat.evaluation.engine import Engine
-from nanochat.training.checkpoint import load_model_from_dir
+from nanochat.model_factory import load_model_from_dir
 
 
 def chat_cli(

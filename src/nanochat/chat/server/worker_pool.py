@@ -8,7 +8,7 @@ import torch
 
 from nanochat.evaluation.engine import Engine
 from nanochat.tokenizer import RustBPETokenizer
-from nanochat.training.checkpoint import load_model
+from nanochat.model_factory import load_model_from_dir
 
 
 @dataclass
@@ -46,7 +46,7 @@ class WorkerPool:
                 device = torch.device(self.device_type)
                 print(f"Loading model on {self.device_type}...")
 
-            model, tokenizer, _ = load_model(source, device, model_tag=model_tag, step=step)
+            model, tokenizer, _ = load_model_from_dir(source, device, model_tag=model_tag, step=step)
             engine = Engine(model, tokenizer)
             worker = Worker(gpu_id=gpu_id, device=device, engine=engine, tokenizer=tokenizer)
             self.workers.append(worker)
