@@ -2,13 +2,12 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import List, Optional
 
 import torch
 
 from nanochat.evaluation.engine import Engine
-from nanochat.tokenizer import RustBPETokenizer
 from nanochat.model_factory import load_model_from_dir
+from nanochat.tokenizer import RustBPETokenizer
 
 
 @dataclass
@@ -24,15 +23,15 @@ class Worker:
 class WorkerPool:
     """Pool of workers, each with a model replica on a different GPU."""
 
-    def __init__(self, device_type: str, num_gpus: Optional[int] = None):
+    def __init__(self, device_type: str, num_gpus: int | None = None):
         if num_gpus is None:
             num_gpus = torch.cuda.device_count() if device_type == "cuda" else 1
         self.device_type = device_type
         self.num_gpus = num_gpus
-        self.workers: List[Worker] = []
+        self.workers: list[Worker] = []
         self.available_workers: asyncio.Queue[Worker] = asyncio.Queue()
 
-    async def initialize(self, source: str, model_tag: Optional[str] = None, step: Optional[int] = None) -> None:
+    async def initialize(self, source: str, model_tag: str | None = None, step: int | None = None) -> None:
         """Load model on each GPU."""
         print(f"Initializing worker pool with {self.num_gpus} GPUs...")
         if self.num_gpus > 1:

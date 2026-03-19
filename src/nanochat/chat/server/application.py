@@ -1,7 +1,6 @@
 """FastAPI app factory: lifespan, middleware, and router registration."""
 
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,8 +16,8 @@ def create_app(
     temperature: float,
     top_k: int,
     max_tokens: int,
-    model_tag: Optional[str],
-    step: Optional[int],
+    model_tag: str | None,
+    step: int | None,
     port: int,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
