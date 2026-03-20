@@ -6,7 +6,7 @@ read_when:
   - Adding a new training backend
   - Understanding how MLX training integrates with nanochat
 status: draft
-last_updated: "2025-07-14"
+last_updated: "2025-07-19"
 ---
 
 # Dual Trainer Architecture
@@ -46,8 +46,7 @@ for step in range(num_iterations):
     trainer.step(lrm, momentum, weight_decay)
 ```
 
-This naturally forces the [TrainingState refactor](training-state-refactor.md) — the loop
-state lives in `TrainingState`, the model+optimizer state lives behind the trainer protocol.
+The loop state lives in `TrainingState`, the model+optimizer state lives behind the trainer protocol.
 
 ---
 
@@ -148,14 +147,15 @@ src/nanochat/
 
 ## Implementation order
 
-1. **TrainingState refactor** — prerequisite, see [plan](training-state-refactor.md)
-2. **BaseTrainer protocol + TorchTrainer** — extract current model/optimizer code, verify nothing breaks
-3. **Backend-agnostic train_base.py** — loop calls only protocol methods
-4. **MLX model** — port GPT to `mlx.nn`, validate forward pass matches PyTorch
-5. **MLX Muon** — port optimizer, validate update step matches PyTorch
-6. **MLXTrainer** — wire model + optimizer, run a d4 smoke test
-7. **Numpy checkpoint interop** — verify resume and handoff across backends
-8. **CLI integration** — `--backend torch|mlx` flag, auto-detection
+1. ✅ **Entry-point refactor** — training/evaluation split into sub-packages with co-located state classes (`PretrainingState`, `SFTState`, `RLState`)
+2. ✅ **Checkpoint manager** — `CheckpointManager` protocol, typed metadata, `model_factory.py`
+3. **BaseTrainer protocol + TorchTrainer** — extract current model/optimizer code, verify nothing breaks
+4. **Backend-agnostic train_base.py** — loop calls only protocol methods
+5. **MLX model** — port GPT to `mlx.nn`, validate forward pass matches PyTorch
+6. **MLX Muon** — port optimizer, validate update step matches PyTorch
+7. **MLXTrainer** — wire model + optimizer, run a d4 smoke test
+8. **Numpy checkpoint interop** — verify resume and handoff across backends
+9. **CLI integration** — `--backend torch|mlx` flag, auto-detection
 
 ---
 
