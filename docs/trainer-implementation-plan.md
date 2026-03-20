@@ -162,17 +162,52 @@ def eval_context(self) -> Iterator[GPT]:
         self._model.train()
 ```
 
-### `CompressionMetrics` numpy refactor (resolves risk 6)
+### `CompressionMetrics` split (resolves risk 6)
 
-Change all method signatures to accept `np.ndarray`. Replace the two PyTorch ops:
+`CompressionMetrics` currently mixes two concerns that diverge once the numpy refactor lands:
 
+- **Computation** — the math (entropy, conditional entropy, compression ratio, gzip). Pure functions, no state, no framework dependency.
+- **Tracking** — `self.history`, `detect_overfitting()`, `get_summary()`, `log_metrics()`. Stateful wrapper driven by `loop.py`.
+
+Split into two files:
+
+```
+src/nanochat/training/
+├── compression_math.py     # pure numpy functions, no state, no torch
+└── compression_metrics.py  # CompressionMetrics — stateful tracker, calls compression_math
+```
+
+`compression_math.py` exports plain functions taking `np.ndarray`, returning `float`:
+
+```python
+def compute_entropy(tokens: np.ndarray) -> float: ...
+def compute_conditional_entropy(logits: np.ndarray, tokens: np.ndarray) -> float: ...
+def compute_compression_ratio(logits: np.ndarray, tokens: np.ndarray) -> float: ...
+def compute_gzip_compression(tokens: np.ndarray) -> float: ...
+```
+
+Replace the two PyTorch ops in `compute_conditional_entropy`:
 - `torch.log_softmax(logits, dim=-1)` → `logits - scipy.special.logsumexp(logits, axis=-1, keepdims=True)`
 - `.gather(dim=-1, index=tokens[..., None]).squeeze(-1)` → `logits[np.arange(B)[:, None], np.arange(T)[None, :], tokens]`
 
-Add a parity test in `tests/test_training/test_compression_metrics.py`:
+`CompressionMetrics` becomes a thin stateful wrapper that calls `compression_math` functions and appends to `self.history`. The torch import disappears from it entirely.
+
+#### Why not split by backend (torch vs mlx)
+
+The only backend-specific ops are `log_softmax` and `gather` — two lines in one function. Splitting by backend would mean two implementations of the same formula that must stay in sync, and any fix applied twice. The numpy path works for both backends because the conversion to numpy happens at the boundary (`forward_logits`), not inside the math:
+
+- `TorchTrainer.forward_logits` → `logits.float().cpu().numpy()` (device transfer, negligible at `compression_log_every=100`)
+- `MLXTrainer.forward_logits` → `np.array(logits)` (zero-copy on Apple Silicon unified memory)
+
+One numpy implementation, both backends feed it identically.
+
+#### Parity test gate
+
+Add `tests/test_training/test_compression_math.py`:
 ```python
-def test_conditional_entropy_numpy_matches_torch():
-    # generate random logits and tokens, compute via both paths, assert abs diff < 1e-5
+def test_conditional_entropy_matches_torch():
+    # random logits + tokens, compute via compression_math and via torch.log_softmax+gather
+    # assert abs diff < 1e-5
 ```
 
 This test must pass before the refactor is merged.
@@ -232,23 +267,26 @@ Model construction, FP8 conversion, `torch.compile`, optimizer construction, dat
 
 ## Implementation steps
 
-1. **`CompressionMetrics` numpy refactor** — `compression_metrics.py` accepts `np.ndarray`, replace `torch.log_softmax` + `.gather()` with numpy equivalents. Write `test_compression_metrics.py` parity test first (torch vs numpy paths must match < 1e-5). Gate: parity test green.
+1. **`compression_math.py`** — new file. Pure numpy functions: `compute_entropy`, `compute_conditional_entropy`, `compute_compression_ratio`, `compute_gzip_compression`. Write `tests/test_training/test_compression_math.py` parity test first (numpy vs torch reference must match < 1e-5). Gate: parity test green.
 
-2. **`training/base/trainer.py`** — new file. Define `StepResult` dataclass and `BaseTrainer` protocol. No dependencies, pure addition.
+2. **`CompressionMetrics` refactor** — `compression_metrics.py` delegates all math to `compression_math`, removes torch import, accepts `np.ndarray` in `log_metrics`. Gate: existing compression tests still pass.
 
-3. **`TorchTrainer`** — in `training/base/trainer.py` (same file as protocol). Implement all methods: `forward_backward`, `step`, `forward_logits`, `model_state_dict`, `optimizer_state_dict`, `load_state_dicts`, `eval_context`. Write unit tests in `tests/test_training/test_torch_trainer.py` covering: `StepResult` fields populated, `initial_lr` assertion fires, `eval_context` restores train mode on exception. Gate: unit tests green.
+3. **`training/base/trainer.py`** — new file. Define `StepResult` dataclass and `BaseTrainer` protocol. No dependencies, pure addition.
 
-4. **`BaseTrainingSetup` swap** — remove `orig_model`, `model`, `optimizer`, `scaler`, `grad_accum_steps`, `train_loader` from `__slots__` / `__init__`. Add `trainer: BaseTrainer`. Update `setup()` to construct `TorchTrainer` and store it. Gate: existing setup tests still pass.
+4. **`TorchTrainer`** — in `training/base/trainer.py` (same file as protocol). Implement all methods: `forward_backward`, `step`, `forward_logits`, `model_state_dict`, `optimizer_state_dict`, `load_state_dicts`, `eval_context`. Write unit tests in `tests/test_training/test_torch_trainer.py` covering: `StepResult` fields populated, `initial_lr` assertion fires, `eval_context` restores train mode on exception. Gate: unit tests green.
 
-5. **`loop.py` refactor** — replace the ~40-line training step block with `forward_backward()` / `step()` calls. Replace `s.orig_model` references with `eval_context()`. Replace checkpoint save with `model_state_dict()` / `optimizer_state_dict()`. Gate: full suite passes.
+5. **`BaseTrainingSetup` swap** — remove `orig_model`, `model`, `optimizer`, `scaler`, `grad_accum_steps`, `train_loader` from `__slots__` / `__init__`. Add `trainer: BaseTrainer`. Update `setup()` to construct `TorchTrainer` and store it. Gate: existing setup tests still pass.
 
-6. **End-to-end parity test** — run 10 steps with the refactored loop, assert loss trajectory matches a reference run captured before the refactor (or run both old and new loop in the same test with identical seeds). Gate: loss values match within 1e-6.
+6. **`loop.py` refactor** — replace the ~40-line training step block with `forward_backward()` / `step()` calls. Replace `s.orig_model` references with `eval_context()`. Replace checkpoint save with `model_state_dict()` / `optimizer_state_dict()`. Gate: full suite passes.
+
+7. **End-to-end parity test** — run 10 steps with the refactored loop, assert loss trajectory matches a reference run captured before the refactor (or run both old and new loop in the same test with identical seeds). Gate: loss values match within 1e-6.
 
 ---
 
 ## Validation checklist before merging step 5
 
-- [ ] `test_compression_metrics.py` — numpy parity test passes
+- [ ] `test_compression_math.py` — numpy parity test passes (< 1e-5 vs torch reference)
+- [ ] `compression_metrics.py` delegates to `compression_math`, no torch import
 - [ ] `TorchTrainer.__init__` asserts `"initial_lr"` present on all param groups
 - [ ] Full suite passes with `TorchTrainer` wired into `BaseTrainingSetup`
 - [ ] Resume from checkpoint restores correct dataloader position (epoch/pq/rg match)

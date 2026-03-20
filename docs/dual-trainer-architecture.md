@@ -103,6 +103,8 @@ src/nanochat/
 │   │   └── ...
 │   ├── mlx_trainer.py       # MLXTrainer implementation
 │   ├── mlx_optimizer.py     # MLX Muon + AdamW
+│   ├── compression_math.py  # pure numpy functions (backend-agnostic)
+│   ├── compression_metrics.py  # stateful tracker, delegates to compression_math
 │   └── ...
 ├── models/
 │   ├── gpt.py               # PyTorch GPT
