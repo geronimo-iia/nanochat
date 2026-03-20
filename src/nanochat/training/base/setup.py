@@ -319,6 +319,7 @@ def _setup_mlx(
 ) -> tuple[BaseTrainer, str, int, int, torch.device, Callable, Callable, float]:
     """Build MLXTrainer. Returns same tuple shape as _setup_torch."""
     import mlx.core as mx
+
     from nanochat.models.mlx_gpt import GPT as MLXGPT
     from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
     from nanochat.training.mlx_trainer import MLXTrainer
@@ -354,7 +355,6 @@ def _setup_mlx(
     # Wrap loader to convert torch tensors → mx.arrays
     def mlx_loader():
         for x, y, state in train_loader:
-            import numpy as np
             yield mx.array(x.numpy()), mx.array(y.numpy()), state
 
     trainer: BaseTrainer = MLXTrainer(model, optimizer, grad_accum_steps, mlx_loader())

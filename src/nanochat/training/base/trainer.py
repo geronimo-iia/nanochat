@@ -13,7 +13,6 @@ import torch
 import torch.distributed as dist
 
 from nanochat.checkpoint.convert import from_numpy_torch
-
 from nanochat.common import get_compute_dtype, is_ddp_initialized
 from nanochat.models.gpt import GPT
 from nanochat.training.base.fp8 import disable_fp8
