@@ -6,7 +6,7 @@ read_when:
   - Reviewing the CompressionMetrics numpy refactor
   - Checking what needs to be done before MLXTrainer can be wired
 status: draft
-last_updated: "2025-07-22"
+last_updated: "2025-07-23"
 ---
 
 # BaseTrainer + TorchTrainer Implementation Plan
@@ -267,17 +267,17 @@ Model construction, FP8 conversion, `torch.compile`, optimizer construction, dat
 
 ## Implementation steps
 
-1. **`compression_math.py`** — new file. Pure numpy functions: `compute_entropy`, `compute_conditional_entropy`, `compute_compression_ratio`, `compute_gzip_compression`. Write `tests/test_training/test_compression_math.py` parity test first (numpy vs torch reference must match < 1e-5). Gate: parity test green.
+1. ✅ **`compression_math.py`** — pure numpy functions + parity test. Committed `df92f2b`.
 
-2. **`CompressionMetrics` refactor** — `compression_metrics.py` delegates all math to `compression_math`, removes torch import, accepts `np.ndarray` in `log_metrics`. Gate: existing compression tests still pass.
+2. ✅ **`CompressionMetrics` refactor** — delegates all math to `compression_math`, torch import removed, accepts `np.ndarray`. Committed `c908f12`.
 
-3. **`training/base/trainer.py`** — new file. Define `StepResult` dataclass and `BaseTrainer` protocol. No dependencies, pure addition.
+3. ✅ **`training/base/trainer.py`** — `StepResult` dataclass and `BaseTrainer` protocol. Committed `f9de1a8`.
 
-4. **`TorchTrainer`** — in `training/base/trainer.py` (same file as protocol). Implement all methods: `forward_backward`, `step`, `forward_logits`, `model_state_dict`, `optimizer_state_dict`, `load_state_dicts`, `eval_context`. Write unit tests in `tests/test_training/test_torch_trainer.py` covering: `StepResult` fields populated, `initial_lr` assertion fires, `eval_context` restores train mode on exception. Gate: unit tests green.
+4. ✅ **`TorchTrainer`** — full implementation in `training/base/trainer.py` with 11 unit tests. Committed `060c43f`.
 
-5. **`BaseTrainingSetup` swap** — remove `orig_model`, `model`, `optimizer`, `scaler`, `grad_accum_steps`, `train_loader` from `__slots__` / `__init__`. Add `trainer: BaseTrainer`. Update `setup()` to construct `TorchTrainer` and store it. Gate: existing setup tests still pass.
+5. ✅ **`BaseTrainingSetup` swap** — holds `trainer: BaseTrainer`, `grad_accum_steps` removed (owned by `TorchTrainer`). Committed `8449683`.
 
-6. **`loop.py` refactor** — replace the ~40-line training step block with `forward_backward()` / `step()` calls. Replace `s.orig_model` references with `eval_context()`. Replace checkpoint save with `model_state_dict()` / `optimizer_state_dict()`. Gate: full suite passes.
+6. ✅ **`loop.py` refactor** — training step, eval, sampling, checkpoint all use protocol methods. Full suite 301 passed. Committed `c46f904`.
 
 7. **End-to-end parity test** — run 10 steps with the refactored loop, assert loss trajectory matches a reference run captured before the refactor (or run both old and new loop in the same test with identical seeds). Gate: loss values match within 1e-6.
 
@@ -285,11 +285,11 @@ Model construction, FP8 conversion, `torch.compile`, optimizer construction, dat
 
 ## Validation checklist before merging step 5
 
-- [ ] `test_compression_math.py` — numpy parity test passes (< 1e-5 vs torch reference)
-- [ ] `compression_metrics.py` delegates to `compression_math`, no torch import
-- [ ] `TorchTrainer.__init__` asserts `"initial_lr"` present on all param groups
-- [ ] Full suite passes with `TorchTrainer` wired into `BaseTrainingSetup`
+- [x] `test_compression_math.py` — numpy parity test passes (< 1e-5 vs torch reference)
+- [x] `compression_metrics.py` delegates to `compression_math`, no torch import
+- [x] `TorchTrainer.__init__` asserts `"initial_lr"` present on all param groups
+- [x] Full suite passes with `TorchTrainer` wired into `BaseTrainingSetup`
 - [ ] Resume from checkpoint restores correct dataloader position (epoch/pq/rg match)
 - [ ] Single-process run (no DDP) completes without hang in `step`
-- [ ] `eval_context` leaves model in train mode after exit (including on exception)
+- [x] `eval_context` leaves model in train mode after exit (including on exception)
 - [ ] End-to-end parity test: 10-step loss trajectory matches pre-refactor reference
