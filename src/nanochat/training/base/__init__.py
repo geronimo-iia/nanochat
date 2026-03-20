@@ -10,6 +10,8 @@ def train_base(config: object) -> None:
 
     os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
+    from nanochat import workspace
+    from nanochat.checkpoint import make_checkpoint_manager
     from nanochat.common import compute_cleanup
     from nanochat.config import Config
     from nanochat.training.base.loop import train_loop
@@ -18,8 +20,11 @@ def train_base(config: object) -> None:
     assert isinstance(config, Config)
     s = None
     try:
-        s = setup(config)
-        train_loop(s)
+        output_dirname = config.common.model_tag if config.common.model_tag else f"d{config.training.depth}"
+        ckpt_dir = workspace.checkpoint_dir("base", output_dirname)
+        checkpoint_manager = make_checkpoint_manager(ckpt_dir, config.checkpoint)
+        s = setup(config, checkpoint_manager)
+        train_loop(s, checkpoint_manager)
     finally:
         if s is not None:
             s.wandb_run.finish()

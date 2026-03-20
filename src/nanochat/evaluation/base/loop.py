@@ -9,9 +9,9 @@ from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine
 from nanochat.evaluation.hf_model import get_hf_token_bytes, load_hf_model
 from nanochat.evaluation.loss_eval import evaluate_bpb
+from nanochat.model_factory import load_model_from_dir
 from nanochat.report import get_report
 from nanochat.tokenizer import get_token_bytes
-from nanochat.training.checkpoint import load_model_from_dir
 from nanochat.training.dataloader import tokenizing_distributed_data_loader_bos_bestfit
 
 
@@ -32,7 +32,8 @@ def run_base_eval(config: Config) -> None:
         model, tokenizer, meta = load_model_from_dir(
             phase="base",
             device=device,
-            model_tag=config.evaluation.model_tag,
+            config=config.checkpoint,
+            model_tag=config.common.model_tag,
             step=config.evaluation.step,
         )
         sequence_len = cast(int, cast(dict[str, object], meta["model_config"])["sequence_len"])

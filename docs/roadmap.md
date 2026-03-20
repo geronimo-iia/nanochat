@@ -6,7 +6,7 @@ read_when:
   - Deciding what to implement next
   - Understanding scope and sequencing
 status: draft
-last_updated: "2025-07-18"
+last_updated: "2025-07-19"
 ---
 
 # nanochat Roadmap
@@ -21,6 +21,7 @@ last_updated: "2025-07-18"
 | Phase 1.5.0 — Data Layout & Config                   | 2026-03-14 | Config system, centralized paths, hierarchical dirs, Python 3.13                             |
 | Phase 1.5.1 — Bugfixes & Tooling                     | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb                               |
 | Phase 2 — Codebase Refactor                          | 2025-07-15 | Config manager, workspace, scheduler co-location, entry point sub-packages, CLI cleanup      |
+| Phase 2.1 — Checkpoint Manager                       | 2025-07-19 | `CheckpointManager` protocol, typed metadata, `model_factory.py`, `CheckpointConfig`, `training/checkpoint.py` deleted |
 
 ## Active — Phase 1.5: Compression-Based Optimization
 
@@ -76,8 +77,6 @@ Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile
 
 - **MPS fp16 vs fp32 loss curves** — `GradScaler(device='mps')` works natively on Apple Silicon. A d8 comparison run (fp16 vs fp32) would confirm whether fp16 training is numerically stable in practice.
 
-- **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint.py`.
-
-- **Checkpoint manager** — `CheckpointManager` protocol with typed metadata, format-agnostic I/O, and logging abstraction. Prerequisite for dual-trainer checkpoint interop. See [design](checkpoint-manager-design.md).
+- **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint/discovery.py`.
 
 - **Dual trainer architecture** — `Trainer` protocol with `TorchTrainer` (current code) and `MLXTrainer` (MLX model + Muon on Apple Silicon). See [plan](dual-trainer-architecture.md).

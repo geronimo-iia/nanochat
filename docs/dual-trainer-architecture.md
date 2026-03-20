@@ -6,7 +6,7 @@ read_when:
   - Adding a new training backend
   - Understanding how MLX training integrates with nanochat
 status: draft
-last_updated: "2025-07-14"
+last_updated: "2025-07-19"
 ---
 
 # Dual Trainer Architecture
@@ -46,8 +46,7 @@ for step in range(num_iterations):
     trainer.step(lrm, momentum, weight_decay)
 ```
 
-This naturally forces the [TrainingState refactor](training-state-refactor.md) — the loop
-state lives in `TrainingState`, the model+optimizer state lives behind the trainer protocol.
+The loop state lives in `TrainingState`, the model+optimizer state lives behind the trainer protocol.
 
 ---
 
@@ -148,19 +147,147 @@ src/nanochat/
 
 ## Implementation order
 
-1. **TrainingState refactor** — prerequisite, see [plan](training-state-refactor.md)
-2. **BaseTrainer protocol + TorchTrainer** — extract current model/optimizer code, verify nothing breaks
-3. **Backend-agnostic train_base.py** — loop calls only protocol methods
-4. **MLX model** — port GPT to `mlx.nn`, validate forward pass matches PyTorch
-5. **MLX Muon** — port optimizer, validate update step matches PyTorch
-6. **MLXTrainer** — wire model + optimizer, run a d4 smoke test
-7. **Numpy checkpoint interop** — verify resume and handoff across backends
+1. ✅ **Entry-point refactor** — training/evaluation split into sub-packages with co-located state classes (`PretrainingState`, `SFTState`, `RLState`)
+2. ✅ **Checkpoint manager** — `CheckpointManager` protocol, typed metadata, `model_factory.py`
+3. **MLX GPT** — port `models/gpt.py` to `mlx.nn`, validate forward pass matches PyTorch
+4. **MLX Muon** — port optimizer, validate update step matches PyTorch
+5. **BaseTrainer protocol + TorchTrainer + MLXTrainer** — abstraction grounded in what MLX actually needs
+6. **Backend-agnostic `train_base.py`** — loop calls only protocol methods
+7. **Checkpoint interop** — numpy or safetensors cross-backend handoff
 8. **CLI integration** — `--backend torch|mlx` flag, auto-detection
+
+---
+
+## BaseTrainer protocol + TorchTrainer implementation proposal
+
+### Step 1 — `training/base/trainer.py`
+
+Define the protocol and `TorchTrainer` in a single new file:
+
+```python
+class BaseTrainer(Protocol):
+    def forward_backward(self, x, y) -> float: ...
+    def step(self, lr_multiplier: float, momentum: float, weight_decay: float) -> None: ...
+    def state_dict(self) -> dict[str, Any]: ...
+    def load_state_dict(self, d: dict[str, Any]) -> None: ...
+```
+
+`TorchTrainer` owns `orig_model`, `model`, `optimizer`, `scaler`, `grad_accum_steps`, `device_type`. It encapsulates:
+- `forward_backward` — the grad accumulation loop (autocast, scaler, loss backward)
+- `step` — param group LR/momentum/weight_decay update + `optimizer.step()` + `zero_grad()`
+- `state_dict` / `load_state_dict` — delegates to `orig_model` and `optimizer`
+
+### Step 2 — `BaseTrainingSetup` loses model/optimizer fields
+
+`orig_model`, `model`, `optimizer`, `scaler`, `grad_accum_steps` are removed from `BaseTrainingSetup.__slots__` and replaced with a single `trainer: BaseTrainer`. `setup()` constructs a `TorchTrainer` and stores it on the setup object.
+
+### Step 3 — `loop.py` calls only protocol methods
+
+The training step block goes from ~30 lines touching `s.model`, `s.optimizer`, `s.scaler` directly to:
+
+```python
+train_loss_f = s.trainer.forward_backward(x, y)
+s.trainer.step(lrm, muon_momentum, muon_weight_decay)
+```
+
+Checkpoint save uses `s.trainer.state_dict()` instead of `s.orig_model.state_dict()` + `s.optimizer.state_dict()` separately.
+
+### What stays in `loop.py`
+
+Everything backend-independent: eval, logging, scheduling, checkpointing, compression metrics, wandb. None of that moves.
+
+### What stays in `setup.py`
+
+Model construction (`build_model_meta`), FP8 conversion, `torch.compile`, optimizer setup, dataloader setup, scheduler setup — all constructed in `setup()` and passed into `TorchTrainer.__init__`.
+
+---
+
+## MLX GPT — design and requirements
+
+### Goal
+
+Port `models/gpt.py` to MLX (`mlx.nn`) with identical architecture and numerically matching
+forward pass output. The MLX model is the foundation for `MLXTrainer` — if the forward pass
+doesn't match PyTorch, nothing downstream is trustworthy.
+
+### File
+
+`src/nanochat/models/mlx_gpt.py` — standalone, no dependency on `models/gpt.py`.
+Shares only `GPTConfig` from `models/config.py`.
+
+### Architecture mapping
+
+| PyTorch component | MLX equivalent | Notes |
+| --- | --- | --- |
+| `nn.Embedding` | `mx.nn.Embedding` | Direct equivalent |
+| `nn.Linear` (no bias) | `mx.nn.Linear(bias=False)` | MLX Linear stores weight as `(out, in)` — same as PyTorch |
+| `F.rms_norm` | `mx.fast.rms_norm` | Available in MLX, no learnable weight (same as PyTorch `norm()`) |
+| `F.relu(x).square()` | `mx.nn.relu(x) ** 2` | ReLU² activation |
+| `F.cross_entropy` | `mx.nn.losses.cross_entropy` | Same semantics |
+| `nn.Parameter` | `mx.array` stored as attribute | MLX has no `nn.Parameter` — leaf arrays are trainable by default via `model.trainable_parameters()` |
+| Rotary embeddings | Same math, MLX ops | `mx.cos`, `mx.sin`, `mx.outer`, `mx.concatenate` |
+| Softcap (`tanh` logit cap) | `mx.tanh` | Direct |
+
+### Attention
+
+The key open question from the design doc: does `mx.fast.scaled_dot_product_attention`
+support sliding window?
+
+- **If yes**: use it directly with a `window_size` equivalent
+- **If no**: implement causal attention manually with a sliding window mask
+
+FA3 and DDP are irrelevant for MLX — single-device only, `mx.compile` replaces `torch.compile`.
+GQA (grouped-query attention) must be handled manually if `mx.fast.scaled_dot_product_attention`
+doesn't support `n_kv_head != n_head` — keys/values would need to be repeated.
+
+### Features to port
+
+| Feature | PyTorch location | Notes |
+| --- | --- | --- |
+| Token embedding + norm | `transformer.wte` + `norm(x)` | Straightforward |
+| Smear gate | `smear_gate`, `smear_lambda` | Small linear + sigmoid, no issues |
+| Value embeddings | `value_embeds` | Alternating layers, `has_ve()` logic unchanged |
+| Rotary embeddings | `_precompute_rotary_embeddings` | Precomputed buffers — MLX uses `mx.array` |
+| Per-layer residual scalars | `resid_lambdas`, `x0_lambdas` | Scalar `mx.array` parameters |
+| Backout | `backout_lambda`, `x_backout` | Mid-layer residual subtraction |
+| Sliding window sizes | `_compute_window_sizes` | Pure Python, reusable as-is |
+| Logit softcap | `softcap * tanh(logits / softcap)` | Direct |
+| KV cache inference | `kv_cache` path in `forward` | Defer — training only for now |
+
+### What to defer
+
+- KV cache inference (`generate`) — training forward pass only in the first iteration
+- FP8 — CUDA-only, irrelevant for MLX
+- DDP / `DistMuonAdamW` — single-device only
+
+### Validation plan
+
+After implementing `mlx_gpt.py`, validate numerics against PyTorch before any training:
+
+1. Instantiate both models with identical `GPTConfig` and identical weights (copy via numpy)
+2. Run a forward pass with the same input tokens
+3. Assert `max(abs(mlx_logits - torch_logits)) < 1e-3` (tolerance for bf16 vs float32 differences)
+4. Run a backward pass on both, assert gradient magnitudes are in the same range
+
+This validation lives in `tests/test_models/test_mlx_gpt.py` and is skipped when MLX is not installed.
+
+### Open questions to resolve before coding
+
+- Does `mx.fast.scaled_dot_product_attention` support sliding window and GQA?
+- Does `mx.nn.value_and_grad` handle the grad accumulation pattern, or do we accumulate manually?
+- MLX arrays are lazy — when does `mx.eval()` need to be called in the training loop?
+
+---
+
+## MLX Muon — design and requirements
+
+_To be written after MLX GPT forward pass is validated._
 
 ---
 
 ## Open questions
 
 - Should MLXTrainer support the compression metrics tracker, or defer that?
-- MLX `scaled_dot_product_attention` sliding window support — verify API availability.
+- Does `mx.fast.scaled_dot_product_attention` support sliding window and GQA?
 - Does `mx.nn.value_and_grad` handle the grad accumulation pattern, or do we accumulate manually?
+- MLX arrays are lazy — when does `mx.eval()` need to be called in the training loop?

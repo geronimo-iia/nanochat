@@ -1,19 +1,17 @@
 """Shared config fields common to all training modes (device, run name, wandb)."""
 
-from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class CommonConfig:
-    base_dir: Optional[str] = None
+    base_dir: str | None = None
     device_type: str = ""
     run: str = "unnamed"
     wandb: str = "local"  # online | local | disabled
     wandb_project: str = "nanochat"
+    model_tag: str | None = None
 
     @classmethod
     def update_parser(cls, parser: argparse.ArgumentParser) -> None:
@@ -38,6 +36,7 @@ class CommonConfig:
             help="wandb mode: online | local | disabled",
         )
         parser.add_argument("--wandb-project", type=str, default=argparse.SUPPRESS, help="wandb project name")
+        parser.add_argument("--model-tag", type=str, default=argparse.SUPPRESS)
 
     @classmethod
     def generate_default(cls) -> str:
@@ -47,4 +46,5 @@ class CommonConfig:
             'run = "unnamed"            # wandb run name\n'
             'wandb = "local"            # online | local | disabled\n'
             'wandb_project = "nanochat"\n'
+            '# model_tag = ""           # empty = auto\n'
         )

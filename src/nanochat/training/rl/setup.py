@@ -3,6 +3,7 @@ from dataclasses import asdict
 
 import torch
 
+from nanochat import workspace
 from nanochat.common import (
     WandbProtocol,
     autodetect_device_type,
@@ -12,8 +13,8 @@ from nanochat.common import (
 )
 from nanochat.config import Config
 from nanochat.evaluation.engine import Engine
+from nanochat.model_factory import load_model_from_dir
 from nanochat.tasks.gsm8k import GSM8K
-from nanochat.training.checkpoint import load_model_from_dir
 from nanochat.training.rl.schedulers import rl_lr_scheduler
 from nanochat.training.rl.state import RLState
 
@@ -43,6 +44,7 @@ class RLTrainingSetup:
         "user_config",
         "wandb_run",
         "state",
+        "ckpt_dir",
     )
 
     def __init__(
@@ -65,6 +67,7 @@ class RLTrainingSetup:
         user_config: dict[str, object],
         wandb_run: WandbProtocol,
         state: RLState,
+        ckpt_dir: str,
     ):
         self.config = config
         self.ddp = ddp
@@ -84,6 +87,7 @@ class RLTrainingSetup:
         self.user_config = user_config
         self.wandb_run = wandb_run
         self.state = state
+        self.ckpt_dir = ckpt_dir
 
 
 def setup(config: Config) -> RLTrainingSetup:
@@ -98,8 +102,9 @@ def setup(config: Config) -> RLTrainingSetup:
     model, tokenizer, _ = load_model_from_dir(
         phase="sft",
         device=device,
-        model_tag=config.rl.model_tag,
-        step=config.rl.model_step,
+        config=config.checkpoint,
+        model_tag=config.common.model_tag,
+        step=config.rl.source_step,
     )
     engine = Engine(model, tokenizer)
 
@@ -127,6 +132,13 @@ def setup(config: Config) -> RLTrainingSetup:
     examples_per_rank = config.rl.examples_per_step // ddp_world_size
     print0(f"Calculated examples per rank: {examples_per_rank}")
 
+    depth = model.config.n_layer
+    ckpt_dir = workspace.checkpoint_dir("rl", config.common.model_tag or f"d{depth}")
+
+    state = RLState.fresh()
+    state.model_config = model.config.__dict__
+    state.user_config = user_config
+
     return RLTrainingSetup(
         config=config,
         ddp=ddp,
@@ -145,5 +157,6 @@ def setup(config: Config) -> RLTrainingSetup:
         examples_per_rank=examples_per_rank,
         user_config=user_config,
         wandb_run=wandb_run,
-        state=RLState.fresh(),
+        state=state,
+        ckpt_dir=ckpt_dir,
     )

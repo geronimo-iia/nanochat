@@ -17,6 +17,7 @@ from nanochat.common import (
     print_banner,
 )
 from nanochat.config import Config
+from nanochat.model_factory import load_model_from_dir, load_optimizer_state
 from nanochat.models.flash_attention import HAS_FA3
 from nanochat.tasks.base import TaskMixture
 from nanochat.tasks.customjson import CustomJSON
@@ -25,7 +26,6 @@ from nanochat.tasks.mmlu import MMLU
 from nanochat.tasks.smoltalk import SmolTalk
 from nanochat.tasks.spellingbee import SimpleSpelling, SpellingBee
 from nanochat.tokenizer import get_token_bytes
-from nanochat.training.checkpoint import load_model_from_dir, load_optimizer_state
 from nanochat.training.sft.dataloader import sft_data_generator_bos_bestfit
 from nanochat.training.sft.schedulers import sft_lr_scheduler, sft_muon_momentum_scheduler
 from nanochat.training.sft.state import SFTState
@@ -152,7 +152,7 @@ def setup(config: Config) -> SFTTrainingSetup:
         )
 
     model, tokenizer, meta = load_model_from_dir(
-        device=device, phase="base", model_tag=config.sft.model_tag, step=config.sft.model_step
+        device=device, phase="base", config=config.checkpoint, model_tag=config.common.model_tag, step=config.sft.source_step
     )
 
     # Inherit training hyperparameters from pretrained checkpoint
@@ -203,8 +203,9 @@ def setup(config: Config) -> SFTTrainingSetup:
             source="base",
             device=device,
             rank=ddp_rank,
-            model_tag=config.sft.model_tag,
-            step=config.sft.model_step,
+            config=config.checkpoint,
+            model_tag=config.common.model_tag,
+            step=config.sft.source_step,
         )
         if optimizer_data is not None:
             base_lrs = [group["lr"] for group in optimizer.param_groups]
@@ -248,7 +249,7 @@ def setup(config: Config) -> SFTTrainingSetup:
 
     state = SFTState.fresh()
 
-    ckpt_dir_name = config.sft.model_tag if config.sft.model_tag else f"d{depth}"
+    ckpt_dir_name = config.common.model_tag if config.common.model_tag else f"d{depth}"
     ckpt_dir = workspace.checkpoint_dir("sft", ckpt_dir_name)
 
     model_config = {
@@ -260,6 +261,8 @@ def setup(config: Config) -> SFTTrainingSetup:
         "n_embd": model.config.n_embd,
         "window_pattern": model.config.window_pattern,
     }
+    state.model_config = model_config
+    state.user_config = user_config
 
     def make_loader(split: str):
         return sft_data_generator_bos_bestfit(

@@ -6,7 +6,7 @@ read_when:
   - Looking for where to add a feature or fix a bug
   - Understanding how packages relate to each other
 status: active
-last_updated: "2025-07-16"
+last_updated: "2025-07-19"
 ---
 
 # Code Structure
@@ -20,15 +20,17 @@ src/nanochat/
 ├── cli.py            # Subcommand dispatch — entry point for the nanochat CLI
 ├── __main__.py       # Delegates to cli.main (enables python -m nanochat)
 ├── workspace.py      # Module-level path store — owns all paths under NANOCHAT_BASE_DIR
+├── model_factory.py  # Model construction and loading — shared by training/, evaluation/, chat/
 ├── execution.py      # Sandboxed Python code execution (used by HumanEval)
 │
 ├── config/           # Configuration dataclasses, TOML loading, CLI arg parsing
 ├── common/           # Shared utilities: dtype, distributed, wandb, I/O
+├── checkpoint/       # CheckpointManager protocol, TorchCheckpointManager, discovery, compat
 ├── models/           # GPT model architecture
 ├── tokenizer/        # BPE tokenizer: training, inference, evaluation
 ├── dataset/          # ClimbMix dataset download and shard iteration
 ├── tasks/            # Evaluation task definitions (MMLU, ARC, GSM8K, ...)
-├── training/         # Training loops, optimizer, scheduler, checkpoint
+├── training/         # Training loops, optimizer, scheduler
 ├── evaluation/       # Evaluation engine and eval entry points
 ├── chat/             # Interactive CLI and web server
 └── report/           # Training report generation
@@ -39,10 +41,30 @@ src/nanochat/
 ### `workspace.py`
 Module-level path store initialized once at startup (after config). Owns all filesystem paths under `NANOCHAT_BASE_DIR` — replaces the old `common/paths.py`. Call `workspace.init()` once; use `workspace.data_dir()`, `workspace.checkpoint_dir(phase, tag)`, etc. everywhere. See [data-layout.md](data-layout.md).
 
-### `config/`
-Dataclasses for each training mode (`CommonConfig`, `TrainingConfig`, `SFTConfig`, `RLConfig`, `EvaluationConfig`, `TokenizerConfig`) plus `Config` (the aggregate) and `ConfigLoader` (TOML + CLI resolution). See [configuration.md](configuration.md).
+### `model_factory.py`
+Model construction and loading shared by `training/`, `evaluation/`, and `chat/`. Keeps model-building logic out of the checkpoint package and avoids cross-package dependencies from `chat/` into `training/`.
 
-Key files: `loader.py`, `config.py`, `common.py`, `cli.py`
+| Function               | Responsibility                                                              |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `load_model_from_dir`  | Load a GPT model + tokenizer from a checkpoint directory                    |
+| `load_optimizer_state` | Load just the optimizer shard for a given rank, without re-loading the model |
+
+### `config/`
+Dataclasses for each training mode (`CommonConfig`, `TrainingConfig`, `SFTConfig`, `RLConfig`, `EvaluationConfig`, `CheckpointConfig`, `TokenizerConfig`) plus `Config` (the aggregate) and `ConfigLoader` (TOML + CLI resolution). See [configuration.md](configuration.md).
+
+Key files: `loader.py`, `config.py`, `common.py`, `checkpoint.py`, `cli.py`
+
+### `checkpoint/`
+Checkpoint I/O abstracted behind a `CheckpointManager` protocol. Format-agnostic — `TorchCheckpointManager` is the current implementation; `SafetensorsCheckpointManager` is planned for dual-trainer interop.
+
+| Module              | Responsibility                                                              |
+| ------------------- | --------------------------------------------------------------------------- |
+| `protocol.py`       | `CheckpointManager`, `CheckpointStateProtocol`, `Checkpoint`, `CheckpointMetadata`, `LoopState` |
+| `torch_manager.py`  | `TorchCheckpointManager` — `.pt` + JSON, `keep_last_n` pruning              |
+| `factory.py`        | `make_checkpoint_manager` — selects implementation from `CheckpointConfig.format` |
+| `logger.py`         | `CheckpointLogger`, `RankZeroLogger`, `SilentLogger`                        |
+| `discovery.py`      | `find_largest_model`, `find_last_step`                                      |
+| `compat.py`         | `patch_missing_config_keys`, `patch_missing_keys` — old checkpoint patching |
 
 ### `common/`
 Shared utilities used across all packages. Nothing in `common/` imports from other nanochat packages (except `wandb.py` which reads from `config/`).
@@ -86,7 +108,6 @@ Training loops and supporting infrastructure.
 | `rl/`                    | GRPO reinforcement learning — `RLState`, rollout, eval, loop         |
 | `optimizer.py`           | `MuonAdamW` and `DistMuonAdamW` optimizers                           |
 | `scaling.py`             | Scaling law utilities (compute-optimal step count, total batch size) |
-| `checkpoint.py`          | Save/load model, optimizer, and training metadata                    |
 | `dataloader.py`          | Distributed token dataloader over ClimbMix shards                    |
 | `compression_metrics.py` | Optional FP8 compression tracking                                    |
 
@@ -124,16 +145,17 @@ nanochat train base --depth 12
   └── cli.main()
         └── ConfigLoader().add_training().resolve(args) → Config
               └── current.init(config) + workspace.init()
-                    └── train_base(config)           # training/base/__init__.py
-                          ├── setup(config)           # training/base/setup.py
-                          │     ├── compute_init()    # common/distributed.py
-                          │     ├── get_tokenizer()   # tokenizer/utils.py
-                          │     ├── GPT(GPTConfig())  # models/gpt.py
-                          │     └── MuonAdamW(...)    # training/optimizer.py
-                          └── train_loop(s)           # training/base/loop.py
-                                ├── evaluate_bpb()   # evaluation/loss_eval.py
-                                ├── evaluate_core()  # evaluation/core_benchmark.py
-                                └── save_checkpoint() # training/checkpoint.py
+                    └── train_base(config)                  # training/base/__init__.py
+                          ├── make_checkpoint_manager()     # checkpoint/factory.py
+                          ├── setup(config, manager)        # training/base/setup.py
+                          │     ├── compute_init()          # common/distributed.py
+                          │     ├── get_tokenizer()         # tokenizer/utils.py
+                          │     ├── GPT(GPTConfig())        # models/gpt.py
+                          │     └── MuonAdamW(...)          # training/optimizer.py
+                          └── train_loop(s, manager)        # training/base/loop.py
+                                ├── evaluate_bpb()         # evaluation/loss_eval.py
+                                ├── evaluate_core()        # evaluation/core_benchmark.py
+                                └── manager.save()         # checkpoint/torch_manager.py
 ```
 
 ### Config resolution
@@ -160,11 +182,13 @@ Engine(model, tokenizer, device)
 - `common/` has no intra-nanochat imports
 - `config/` has no intra-nanochat imports
 - `workspace.py` imports only from `config/`
+- `checkpoint/` imports only from `common/`, `config/`, `workspace`
 - `models/` imports only from `common/`
 - `tasks/` imports only from `common/`
 - `tokenizer/` imports from `common/`, `workspace`
 - `dataset/` imports from `common/`, `workspace`
-- `training/base/`, `training/sft/`, `training/rl/` import from `common/`, `workspace`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
-- `evaluation/base/`, `evaluation/chat/` import from `common/`, `workspace`, `models/`, `tokenizer/`, `tasks/`
-- `chat/` imports from `common/`, `config/`, `evaluation/`, `tokenizer/`
+- `model_factory.py` imports from `checkpoint/`, `config/`, `models/`, `tokenizer/`, `workspace`
+- `training/base/`, `training/sft/`, `training/rl/` import from `common/`, `workspace`, `checkpoint/`, `model_factory`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
+- `evaluation/base/`, `evaluation/chat/` import from `common/`, `workspace`, `model_factory`, `models/`, `tokenizer/`, `tasks/`
+- `chat/` imports from `common/`, `config/`, `model_factory`, `evaluation/`, `tokenizer/`
 - `cli.py` imports from all packages (top-level wiring only)

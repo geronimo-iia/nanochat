@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from nanochat import workspace
+from nanochat.checkpoint import CheckpointManager
 from nanochat.common import (
     WandbProtocol,
     autodetect_device_type,
@@ -28,7 +28,6 @@ from nanochat.training.base.schedulers import (
     base_weight_decay_scheduler,
 )
 from nanochat.training.base.state import PretrainingState
-from nanochat.training.checkpoint import load_checkpoint
 from nanochat.training.dataloader import (
     tokenizing_distributed_data_loader_bos_bestfit,
     tokenizing_distributed_data_loader_with_state_bos_bestfit,
@@ -201,7 +200,7 @@ class BaseTrainingSetup:
         self.resuming = resuming
 
 
-def setup(config: Config) -> BaseTrainingSetup:
+def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTrainingSetup:
     """Initialize compute, model, optimizer, dataloaders and schedulers for base pretraining."""
     print_banner()
 
@@ -259,20 +258,18 @@ def setup(config: Config) -> BaseTrainingSetup:
     model.to_empty(device=device)
     model.init_weights()
 
-    output_dirname = config.training.model_tag if config.training.model_tag else f"d{config.training.depth}"
-    ckpt_dir = workspace.checkpoint_dir("base", output_dirname)
+    ckpt_dir = checkpoint_manager.checkpoint_dir
     config.save(Path(ckpt_dir) / "config.toml")
 
-    resuming = config.training.resume_from_step != -1
-    optimizer_data: dict[str, object] | None = None
-    meta_data: dict[str, object] | None = None
+    resuming = config.checkpoint.resume_from_step != -1
+    resume_ckpt = None
     if resuming:
-        print0(f"Resuming optimization from step {config.training.resume_from_step}")
-        model_data, optimizer_data, meta_data = load_checkpoint(
-            ckpt_dir, config.training.resume_from_step, device, load_optimizer=True, rank=ddp_rank
+        print0(f"Resuming optimization from step {config.checkpoint.resume_from_step}")
+        resume_ckpt = checkpoint_manager.load(
+            config.checkpoint.resume_from_step, device, load_optimizer=True, rank=ddp_rank
         )
-        model.load_state_dict(model_data, strict=True, assign=True)
-        del model_data
+        model.load_state_dict(resume_ckpt.model_state, strict=True, assign=True)
+        del resume_ckpt.model_state
 
     _convert_fp8(model, config, device_type)
 
@@ -327,8 +324,9 @@ def setup(config: Config) -> BaseTrainingSetup:
         weight_decay=weight_decay_scaled,
     )
     if resuming:
-        optimizer.load_state_dict(optimizer_data)
-        del optimizer_data
+        assert resume_ckpt is not None
+        optimizer.load_state_dict(resume_ckpt.optimizer_state)
+        del resume_ckpt.optimizer_state
 
     scaler = torch.amp.GradScaler(device=device_type) if get_compute_dtype() == torch.float16 else None
     if scaler is not None:
@@ -336,8 +334,8 @@ def setup(config: Config) -> BaseTrainingSetup:
 
     dataloader_resume_state_dict = None
     if resuming:
-        assert meta_data is not None
-        dataloader_resume_state_dict = meta_data["dataloader_state_dict"]
+        assert resume_ckpt is not None
+        dataloader_resume_state_dict = resume_ckpt.metadata.dataloader_state_dict
 
     train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
         tokenizer,
@@ -392,8 +390,15 @@ def setup(config: Config) -> BaseTrainingSetup:
     if not resuming:
         state = PretrainingState.fresh()
     else:
-        assert meta_data is not None
-        state = PretrainingState.from_checkpoint(meta_data)
+        assert resume_ckpt is not None
+        state = PretrainingState.from_metadata(resume_ckpt.metadata)
+    state.model_config = model_config_kwargs
+    state.user_config = {
+        **user_config,
+        "device_batch_size": config.training.device_batch_size,
+        "max_seq_len": config.training.max_seq_len,
+        "total_batch_size": total_batch_size,
+    }
 
     return BaseTrainingSetup(
         config=config,

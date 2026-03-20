@@ -32,6 +32,9 @@ class ConfigLoader:
         self._sections.add(name)
         return self
 
+    def add_checkpoint(self) -> ConfigLoader:
+        return self._add_section("checkpoint")
+
     def add_training(self) -> ConfigLoader:
         return self._add_section("training")
 

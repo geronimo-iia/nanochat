@@ -80,6 +80,7 @@ def chat_web_server(
         temperature=temperature,
         top_k=top_k,
         max_tokens=max_tokens,
+        checkpoint_config=config.checkpoint,
         model_tag=model_tag,
         step=step,
         port=port,

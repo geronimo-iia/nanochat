@@ -4,6 +4,7 @@ import time
 import torch
 import torch.distributed as dist
 
+from nanochat.checkpoint import CheckpointManager
 from nanochat.common import get_compute_dtype, is_ddp_initialized, print0
 from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine
@@ -11,11 +12,10 @@ from nanochat.evaluation.loss_eval import evaluate_bpb
 from nanochat.report import get_report
 from nanochat.training.base.fp8 import disable_fp8
 from nanochat.training.base.setup import BaseTrainingSetup
-from nanochat.training.checkpoint import save_checkpoint
 from nanochat.training.compression_metrics import CompressionMetrics
 
 
-def train_loop(s: BaseTrainingSetup) -> None:
+def train_loop(s: BaseTrainingSetup, checkpoint_manager: CheckpointManager) -> None:
     """Run the base pretraining loop. Mutates s.state in place."""
     compression_tracker = None
     if s.config.training.track_compression:
@@ -106,21 +106,14 @@ def train_loop(s: BaseTrainingSetup) -> None:
         # Checkpoint
         if last_step or (
             state.step > 0
-            and state.step != s.config.training.resume_from_step
-            and s.config.training.save_every > 0
-            and state.step % s.config.training.save_every == 0
+            and state.step != s.config.checkpoint.resume_from_step
+            and s.config.checkpoint.save_every > 0
+            and state.step % s.config.checkpoint.save_every == 0
         ):
-            batch_config = {
-                "device_batch_size": s.config.training.device_batch_size,
-                "max_seq_len": s.config.training.max_seq_len,
-                "total_batch_size": s.total_batch_size,
-            }
-            save_checkpoint(
-                s.ckpt_dir,
-                state.step,
+            checkpoint_manager.save(
+                state,
                 s.orig_model.state_dict(),
                 s.optimizer.state_dict(),
-                state.to_checkpoint(s.model_config_kwargs, s.user_config, batch_config),
                 rank=s.ddp_rank,
             )
 
@@ -235,7 +228,7 @@ def train_loop(s: BaseTrainingSetup) -> None:
             step=state.step,
         )
 
-        first_step_of_run = (state.step == 0) or (s.resuming and state.step == s.config.training.resume_from_step)
+        first_step_of_run = (state.step == 0) or (s.resuming and state.step == s.config.checkpoint.resume_from_step)
         state.step += 1
 
         if first_step_of_run:

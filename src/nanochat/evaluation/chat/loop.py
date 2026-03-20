@@ -9,6 +9,7 @@ from nanochat.common import autodetect_device_type, compute_init, get_dist_info,
 from nanochat.config import Config
 from nanochat.evaluation.chat.state import ChatEvalResult
 from nanochat.evaluation.engine import Engine
+from nanochat.model_factory import load_model_from_dir
 from nanochat.report import get_report
 from nanochat.tasks.arc import ARC
 from nanochat.tasks.base import Task
@@ -16,7 +17,6 @@ from nanochat.tasks.gsm8k import GSM8K
 from nanochat.tasks.humaneval import HumanEval
 from nanochat.tasks.mmlu import MMLU
 from nanochat.tasks.spellingbee import SpellingBee
-from nanochat.training.checkpoint import load_model_from_dir
 
 
 def run_generative_eval(
@@ -217,7 +217,7 @@ def chat_eval(
     device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
     _, _, _, _, device = compute_init(device_type)
 
-    model, tokenizer, _ = load_model_from_dir(phase=source, device=device, model_tag=model_tag, step=step)
+    model, tokenizer, _ = load_model_from_dir(phase=source, device=device, config=config.checkpoint, model_tag=model_tag, step=step)
     engine = Engine(model, tokenizer)
 
     all_tasks = ["ARC-Easy", "ARC-Challenge", "MMLU", "GSM8K", "HumanEval", "SpellingBee"]

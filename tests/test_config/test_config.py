@@ -12,6 +12,7 @@ from nanochat.config import (
     SFTConfig,
     TrainingConfig,
 )
+from nanochat.config.checkpoint import CheckpointConfig
 
 # ---------------------------------------------------------------------------
 # Dataclass defaults
@@ -25,6 +26,7 @@ def test_common_config_defaults():
     assert cfg.run == "unnamed"
     assert cfg.wandb == "local"
     assert cfg.wandb_project == "nanochat"
+    assert cfg.model_tag is None
 
 
 def test_training_config_defaults():
@@ -32,20 +34,20 @@ def test_training_config_defaults():
     assert cfg.depth == 20
     assert cfg.aspect_ratio == 64
     assert cfg.fp8 is False
-    assert cfg.model_tag is None
 
 
 def test_sft_config_defaults():
     cfg = SFTConfig()
     assert cfg.load_optimizer is True
     assert cfg.num_iterations == -1
-    assert cfg.model_tag is None
+    assert cfg.source_step is None
 
 
 def test_rl_config_defaults():
     cfg = RLConfig()
     assert cfg.num_epochs == 1
     assert cfg.temperature == 1.0
+    assert cfg.source_step is None
 
 
 def test_evaluation_config_defaults():
@@ -107,12 +109,33 @@ def test_evaluation_generate_default_is_valid_toml(tmp_path):
 def test_config_generate_default_all_sections():
     text = Config.generate_default()
     data = tomllib.loads(text)
-    for section in ("common", "training", "sft", "rl", "evaluation"):
+    for section in ("common", "training", "sft", "rl", "evaluation", "checkpoint"):
         assert section in data, f"missing [{section}]"
     assert data["training"]["depth"] == 20
     assert data["sft"]["mmlu_epochs"] == 3
     assert data["rl"]["num_epochs"] == 1
     assert data["evaluation"]["device_batch_size"] == 32
+    assert data["checkpoint"]["format"] == "torch"
+
+
+# ---------------------------------------------------------------------------
+# CheckpointConfig
+# ---------------------------------------------------------------------------
+
+
+def test_checkpoint_config_defaults():
+    cfg = CheckpointConfig()
+    assert cfg.format == "torch"
+    assert cfg.save_every == -1
+    assert cfg.resume_from_step == -1
+    assert cfg.keep_last_n == -1
+
+
+def test_checkpoint_generate_default_is_valid_toml(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text("[checkpoint]\n" + CheckpointConfig.generate_default(), encoding="utf-8")
+    data = tomllib.loads(p.read_text())
+    assert data["checkpoint"]["format"] == "torch"
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +181,9 @@ def test_save_roundtrip(tmp_path):
 
 def test_save_omits_none_fields(tmp_path):
     cfg = Config()
-    assert cfg.training.model_tag is None
+    assert cfg.common.model_tag is None
     p = tmp_path / "config.toml"
     cfg.save(p)
     with open(p, "rb") as f:
         data = tomllib.load(f)
-    assert "model_tag" not in data["training"]
+    assert "model_tag" not in data["common"]
