@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 
 from nanochat.checkpoint import CheckpointManager
+from nanochat.training.base.trainer import BaseTrainer, TorchTrainer
 from nanochat.common import (
     WandbProtocol,
     autodetect_device_type,
@@ -100,13 +101,9 @@ class BaseTrainingSetup:
         "ddp_world_size",
         "device",
         "master_process",
-        "orig_model",
-        "model",
+        "trainer",
         "tokenizer",
         "token_bytes",
-        "optimizer",
-        "scaler",
-        "train_loader",
         "build_val_loader",
         "ckpt_dir",
         "user_config",
@@ -118,7 +115,6 @@ class BaseTrainingSetup:
         "num_flops_per_token",
         "num_scaling_params",
         "gpu_peak_flops",
-        "grad_accum_steps",
         "get_lr_multiplier",
         "get_muon_momentum",
         "get_weight_decay",
@@ -137,13 +133,9 @@ class BaseTrainingSetup:
         ddp_world_size: int,
         device: torch.device,
         master_process: bool,
-        orig_model: GPT,
-        model: GPT,
+        trainer: BaseTrainer,
         tokenizer: object,
         token_bytes: object,
-        optimizer: object,
-        scaler: torch.amp.GradScaler | None,
-        train_loader: object,
         build_val_loader: Callable[[], object],
         ckpt_dir: str,
         user_config: dict[str, object],
@@ -155,7 +147,6 @@ class BaseTrainingSetup:
         num_flops_per_token: float,
         num_scaling_params: int,
         gpu_peak_flops: float,
-        grad_accum_steps: int,
         get_lr_multiplier: Callable[[int], float],
         get_muon_momentum: Callable[[int], float],
         get_weight_decay: Callable[[int], float],
@@ -171,13 +162,9 @@ class BaseTrainingSetup:
         self.ddp_world_size = ddp_world_size
         self.device = device
         self.master_process = master_process
-        self.orig_model = orig_model
-        self.model = model
+        self.trainer = trainer
         self.tokenizer = tokenizer
         self.token_bytes = token_bytes
-        self.optimizer = optimizer
-        self.scaler = scaler
-        self.train_loader = train_loader
         self.build_val_loader = build_val_loader
         self.ckpt_dir = ckpt_dir
         self.user_config = user_config
@@ -189,7 +176,6 @@ class BaseTrainingSetup:
         self.num_flops_per_token = num_flops_per_token
         self.num_scaling_params = num_scaling_params
         self.gpu_peak_flops = gpu_peak_flops
-        self.grad_accum_steps = grad_accum_steps
         self.get_lr_multiplier = get_lr_multiplier
         self.get_muon_momentum = get_muon_momentum
         self.get_weight_decay = get_weight_decay
@@ -381,6 +367,16 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
     print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
     print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
 
+    trainer = TorchTrainer(
+        orig_model=orig_model,
+        model=model,
+        optimizer=optimizer,
+        scaler=scaler,
+        grad_accum_steps=grad_accum_steps,
+        device_type=device_type,
+        train_loader=train_loader,
+    )
+
     get_lr_multiplier = base_lr_scheduler(
         num_iterations, config.training.warmup_steps, config.training.warmdown_ratio, config.training.final_lr_frac
     )
@@ -407,13 +403,9 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         ddp_world_size=ddp_world_size,
         device=device,
         master_process=master_process,
-        orig_model=orig_model,
-        model=model,
+        trainer=trainer,
         tokenizer=tokenizer,
         token_bytes=token_bytes,
-        optimizer=optimizer,
-        scaler=scaler,
-        train_loader=train_loader,
         build_val_loader=build_val_loader,
         ckpt_dir=ckpt_dir,
         user_config=user_config,
@@ -425,7 +417,6 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         num_flops_per_token=num_flops_per_token,
         num_scaling_params=num_scaling_params,
         gpu_peak_flops=gpu_peak_flops,
-        grad_accum_steps=grad_accum_steps,
         get_lr_multiplier=get_lr_multiplier,
         get_muon_momentum=get_muon_momentum,
         get_weight_decay=get_weight_decay,
