@@ -292,4 +292,4 @@ Model construction, FP8 conversion, `torch.compile`, optimizer construction, dat
 - [x] Resume from checkpoint restores correct dataloader position — no-repeat verified (`dev/verify_dataloader_resume.py`). Note: resume is approximate (buffer-based packing), exact batch reproduction is not guaranteed by design.
 - [x] Single-process run (no DDP) completes without hang in `step` — verified (`dev/verify_single_process_step.py`)
 - [x] `eval_context` leaves model in train mode after exit (including on exception)
-- [ ] End-to-end parity test: 10-step loss trajectory matches pre-refactor reference
+- [x] End-to-end parity test: 10-step loss trajectory matches pre-refactor reference — self-consistency verified, zero diff (`dev/verify_e2e_parity.py`)
