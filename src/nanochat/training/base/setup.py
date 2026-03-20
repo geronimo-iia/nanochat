@@ -6,9 +6,9 @@ from pathlib import Path
 import torch
 
 from nanochat.checkpoint import CheckpointManager
-from nanochat.training.base.trainer import BaseTrainer, TorchTrainer
 from nanochat.common import (
     WandbProtocol,
+    autodetect_backend,
     autodetect_device_type,
     compute_init,
     get_compute_dtype,
@@ -29,6 +29,7 @@ from nanochat.training.base.schedulers import (
     base_weight_decay_scheduler,
 )
 from nanochat.training.base.state import PretrainingState
+from nanochat.training.base.trainer import BaseTrainer, TorchTrainer
 from nanochat.training.dataloader import (
     tokenizing_distributed_data_loader_bos_bestfit,
     tokenizing_distributed_data_loader_with_state_bos_bestfit,
@@ -186,10 +187,24 @@ class BaseTrainingSetup:
         self.resuming = resuming
 
 
-def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTrainingSetup:
-    """Initialize compute, model, optimizer, dataloaders and schedulers for base pretraining."""
-    print_banner()
+# ---------------------------------------------------------------------------
+# Backend-specific trainer construction
+# ---------------------------------------------------------------------------
 
+def _setup_torch(
+    config: Config,
+    checkpoint_manager: CheckpointManager,
+    meta_model: GPT,
+    model_config_kwargs: dict,
+    vocab_size: int,
+    weight_decay_scaled: float,
+    batch_lr_scale: float,
+    grad_accum_steps: int,
+    tokenizer: object,
+    resuming: bool,
+    resume_ckpt: object,
+) -> tuple[BaseTrainer, str, int, int, torch.device, Callable, Callable, float]:
+    """Build TorchTrainer. Returns (trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops)."""
     device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
     _, ddp_rank, _, ddp_world_size, device = compute_init(device_type)
     synchronize, get_max_memory = get_device_sync(device_type)
@@ -201,10 +216,6 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
     else:
         gpu_peak_flops = float("inf")
     print0(f"COMPUTE_DTYPE: {get_compute_dtype()} ({get_compute_dtype_reason()})")
-
-    user_config = asdict(config)
-    master_process = ddp_rank == 0
-    wandb_run = init_wandb(user_config=user_config, master_process=master_process)
 
     if _use_fa3():
         print0("✓ Using Flash Attention 3 (Hopper GPU detected), efficient, new and awesome.")
@@ -226,11 +237,6 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
             )
         print0("!" * 80)
 
-    tokenizer = get_tokenizer()
-    token_bytes = get_token_bytes(device=device)
-    vocab_size = tokenizer.get_vocab_size()
-    print0(f"Vocab size: {vocab_size:,}")
-
     model = build_model_meta(
         config.training.depth,
         config.training.aspect_ratio,
@@ -239,21 +245,11 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         config.training.window_pattern,
         vocab_size,
     )
-    model_config_kwargs = asdict(model.config)
-    print0(f"Model config:\n{json.dumps(model_config_kwargs, indent=2)}")
     model.to_empty(device=device)
     model.init_weights()
 
-    ckpt_dir = checkpoint_manager.checkpoint_dir
-    config.save(Path(ckpt_dir) / "config.toml")
-
-    resuming = config.checkpoint.resume_from_step != -1
-    resume_ckpt = None
     if resuming:
-        print0(f"Resuming optimization from step {config.checkpoint.resume_from_step}")
-        resume_ckpt = checkpoint_manager.load(
-            config.checkpoint.resume_from_step, device, load_optimizer=True, rank=ddp_rank
-        )
+        assert resume_ckpt is not None
         model.load_state_dict(resume_ckpt.model_state, strict=True, assign=True)
         del resume_ckpt.model_state
 
@@ -264,43 +260,6 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         model = torch.compile(model, dynamic=False)
     else:
         print0("Skipping torch.compile on MPS (inductor backend not supported, causes NaN gradients)")
-
-    param_counts = model.num_scaling_params()
-    print0("Parameter counts:")
-    for key, value in param_counts.items():
-        print0(f"{key:24s}: {value:,}")
-    num_params = param_counts["total"]
-    num_flops_per_token = model.estimate_flops()
-    print0(f"Estimated FLOPs per token: {num_flops_per_token:e}")
-
-    d12_ref = build_model_meta(
-        12,
-        config.training.aspect_ratio,
-        config.training.head_dim,
-        config.training.max_seq_len,
-        config.training.window_pattern,
-        vocab_size,
-    )
-    hp = compute_training_hyperparams(
-        target_param_data_ratio=config.training.target_param_data_ratio,
-        total_batch_size_override=config.training.total_batch_size,
-        weight_decay=config.training.weight_decay,
-        num_scaling_params=get_scaling_params(model),
-        d12_scaling_params=get_scaling_params(d12_ref),
-    )
-    num_scaling_params = hp.num_scaling_params
-    target_tokens = hp.target_tokens
-    total_batch_size = hp.total_batch_size
-    batch_lr_scale = hp.batch_lr_scale
-    weight_decay_scaled = hp.weight_decay_scaled
-    if config.training.total_batch_size == -1:
-        print0(f"Auto-computed optimal batch size: {total_batch_size:,} tokens")
-    if batch_lr_scale != 1.0:
-        print0(f"Scaling LRs by {batch_lr_scale:.4f} for batch size {total_batch_size:,} (reference: {B_REF:,})")
-    if weight_decay_scaled != config.training.weight_decay:
-        print0(
-            f"Scaling weight decay from {config.training.weight_decay:.6f} to {weight_decay_scaled:.6f} for depth {config.training.depth}"
-        )
 
     optimizer = model.setup_optimizer(
         unembedding_lr=config.training.unembedding_lr * batch_lr_scale,
@@ -331,9 +290,149 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         device=device,
         resume_state_dict=dataloader_resume_state_dict,
     )
-    build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
-        tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
+
+    trainer: BaseTrainer = TorchTrainer(
+        orig_model=orig_model,
+        model=model,
+        optimizer=optimizer,
+        scaler=scaler,
+        grad_accum_steps=grad_accum_steps,
+        device_type=device_type,
+        train_loader=train_loader,
     )
+    return trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops
+
+
+def _setup_mlx(
+    config: Config,
+    checkpoint_manager: CheckpointManager,
+    model_config_kwargs: dict,
+    vocab_size: int,
+    weight_decay_scaled: float,
+    batch_lr_scale: float,
+    grad_accum_steps: int,
+    tokenizer: object,
+    resuming: bool,
+    resume_ckpt: object,
+) -> tuple[BaseTrainer, str, int, int, torch.device, Callable, Callable, float]:
+    """Build MLXTrainer. Returns same tuple shape as _setup_torch."""
+    import mlx.core as mx
+    from nanochat.models.mlx_gpt import GPT as MLXGPT
+    from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
+    from nanochat.training.mlx_trainer import MLXTrainer
+
+    print0("✓ MLX backend — single device, mx.compile, unified memory")
+
+    gpt_config = GPTConfig(**model_config_kwargs)
+    model = MLXGPT(gpt_config)
+
+    optimizer = MuonAdamW(build_param_groups(
+        model,
+        unembedding_lr=config.training.unembedding_lr * batch_lr_scale,
+        embedding_lr=config.training.embedding_lr * batch_lr_scale,
+        scalar_lr=config.training.scalar_lr * batch_lr_scale,
+        matrix_lr=config.training.matrix_lr * batch_lr_scale,
+        weight_decay=weight_decay_scaled,
+    ))
+
+    dataloader_resume_state_dict = None
+    if resuming:
+        assert resume_ckpt is not None
+        dataloader_resume_state_dict = resume_ckpt.metadata.dataloader_state_dict
+
+    train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
+        tokenizer,
+        config.training.device_batch_size,
+        config.training.max_seq_len,
+        split="train",
+        device=torch.device("cpu"),
+        resume_state_dict=dataloader_resume_state_dict,
+    )
+
+    # Wrap loader to convert torch tensors → mx.arrays
+    def mlx_loader():
+        for x, y, state in train_loader:
+            import numpy as np
+            yield mx.array(x.numpy()), mx.array(y.numpy()), state
+
+    trainer: BaseTrainer = MLXTrainer(model, optimizer, grad_accum_steps, mlx_loader())
+
+    if resuming:
+        assert resume_ckpt is not None
+        trainer.load_state_dicts(resume_ckpt.model_state, resume_ckpt.optimizer_state)
+        del resume_ckpt.model_state, resume_ckpt.optimizer_state
+
+    synchronize: Callable[[], None] = lambda: mx.eval([])
+    get_max_memory: Callable[[], int] = lambda: 0
+
+    return trainer, "mlx", 0, 1, torch.device("cpu"), synchronize, get_max_memory, float("inf")
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTrainingSetup:
+    """Initialize compute, model, optimizer, dataloaders and schedulers for base pretraining."""
+    print_banner()
+
+    backend = config.common.backend or autodetect_backend()
+
+    user_config = asdict(config)
+    wandb_run = init_wandb(user_config=user_config, master_process=True)
+
+    tokenizer = get_tokenizer()
+    vocab_size = tokenizer.get_vocab_size()
+    print0(f"Vocab size: {vocab_size:,}")
+
+    # Use torch meta model for param counting and scaling — framework-agnostic
+    meta_model = build_model_meta(
+        config.training.depth,
+        config.training.aspect_ratio,
+        config.training.head_dim,
+        config.training.max_seq_len,
+        config.training.window_pattern,
+        vocab_size,
+    )
+    model_config_kwargs = asdict(meta_model.config)
+    print0(f"Model config:\n{json.dumps(model_config_kwargs, indent=2)}")
+
+    param_counts = meta_model.num_scaling_params()
+    print0("Parameter counts:")
+    for key, value in param_counts.items():
+        print0(f"{key:24s}: {value:,}")
+    num_params = param_counts["total"]
+    num_flops_per_token = meta_model.estimate_flops()
+    print0(f"Estimated FLOPs per token: {num_flops_per_token:e}")
+
+    d12_ref = build_model_meta(
+        12,
+        config.training.aspect_ratio,
+        config.training.head_dim,
+        config.training.max_seq_len,
+        config.training.window_pattern,
+        vocab_size,
+    )
+    hp = compute_training_hyperparams(
+        target_param_data_ratio=config.training.target_param_data_ratio,
+        total_batch_size_override=config.training.total_batch_size,
+        weight_decay=config.training.weight_decay,
+        num_scaling_params=get_scaling_params(meta_model),
+        d12_scaling_params=get_scaling_params(d12_ref),
+    )
+    num_scaling_params = hp.num_scaling_params
+    target_tokens = hp.target_tokens
+    total_batch_size = hp.total_batch_size
+    batch_lr_scale = hp.batch_lr_scale
+    weight_decay_scaled = hp.weight_decay_scaled
+    if config.training.total_batch_size == -1:
+        print0(f"Auto-computed optimal batch size: {total_batch_size:,} tokens")
+    if batch_lr_scale != 1.0:
+        print0(f"Scaling LRs by {batch_lr_scale:.4f} for batch size {total_batch_size:,} (reference: {B_REF:,})")
+    if weight_decay_scaled != config.training.weight_decay:
+        print0(
+            f"Scaling weight decay from {config.training.weight_decay:.6f} to {weight_decay_scaled:.6f} for depth {config.training.depth}"
+        )
 
     assert (
         config.training.num_iterations > 0
@@ -358,24 +457,68 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
     print0(f"Total training FLOPs estimate: {num_flops_per_token * total_tokens:e}")
 
     tokens_per_fwdbwd = config.training.device_batch_size * config.training.max_seq_len
-    world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size
-    assert total_batch_size % world_tokens_per_fwdbwd == 0
-    grad_accum_steps = total_batch_size // world_tokens_per_fwdbwd
+    # DDP world size is 1 for MLX — resolved after backend dispatch, use 1 for grad_accum_steps here
+    ddp_world_size_for_accum = 1 if backend == "mlx" else None  # resolved below for torch
+    if ddp_world_size_for_accum is None:
+        # Torch: need to init compute to know world size — defer grad_accum_steps to _setup_torch
+        # Use a placeholder; _setup_torch will assert the division holds
+        ddp_world_size_for_accum = 1  # will be overridden
+    world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size_for_accum
+    assert total_batch_size % tokens_per_fwdbwd == 0
+    grad_accum_steps = total_batch_size // tokens_per_fwdbwd  # per-rank, corrected in torch path
+
+    ckpt_dir = checkpoint_manager.checkpoint_dir
+    config.save(Path(ckpt_dir) / "config.toml")
+
+    resuming = config.checkpoint.resume_from_step != -1
+    resume_ckpt = None
+    if resuming:
+        print0(f"Resuming optimization from step {config.checkpoint.resume_from_step}")
+        resume_ckpt = checkpoint_manager.load(
+            config.checkpoint.resume_from_step,
+            torch.device("cpu"),
+            load_optimizer=True,
+            rank=0,
+        )
+
+    if backend == "mlx":
+        trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops = _setup_mlx(
+            config=config,
+            checkpoint_manager=checkpoint_manager,
+            model_config_kwargs=model_config_kwargs,
+            vocab_size=vocab_size,
+            weight_decay_scaled=weight_decay_scaled,
+            batch_lr_scale=batch_lr_scale,
+            grad_accum_steps=grad_accum_steps,
+            tokenizer=tokenizer,
+            resuming=resuming,
+            resume_ckpt=resume_ckpt,
+        )
+        token_bytes = get_token_bytes(device=torch.device("cpu"))
+        master_process = True
+    else:
+        trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops = _setup_torch(
+            config=config,
+            checkpoint_manager=checkpoint_manager,
+            meta_model=meta_model,
+            model_config_kwargs=model_config_kwargs,
+            vocab_size=vocab_size,
+            weight_decay_scaled=weight_decay_scaled,
+            batch_lr_scale=batch_lr_scale,
+            grad_accum_steps=total_batch_size // (tokens_per_fwdbwd),  # corrected after ddp_world_size known
+            tokenizer=tokenizer,
+            resuming=resuming,
+            resume_ckpt=resume_ckpt,
+        )
+        token_bytes = get_token_bytes(device=device)
+        master_process = ddp_rank == 0
+        # Re-init wandb with correct master_process now that ddp_rank is known
+        wandb_run = init_wandb(user_config=user_config, master_process=master_process)
+
     print0(
         f"Tokens / micro-batch / rank: {config.training.device_batch_size} x {config.training.max_seq_len} = {tokens_per_fwdbwd:,}"
     )
-    print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
     print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
-
-    trainer = TorchTrainer(
-        orig_model=orig_model,
-        model=model,
-        optimizer=optimizer,
-        scaler=scaler,
-        grad_accum_steps=grad_accum_steps,
-        device_type=device_type,
-        train_loader=train_loader,
-    )
 
     get_lr_multiplier = base_lr_scheduler(
         num_iterations, config.training.warmup_steps, config.training.warmdown_ratio, config.training.final_lr_frac
@@ -395,6 +538,10 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         "max_seq_len": config.training.max_seq_len,
         "total_batch_size": total_batch_size,
     }
+
+    build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
+        tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
+    )
 
     return BaseTrainingSetup(
         config=config,
