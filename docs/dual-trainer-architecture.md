@@ -150,7 +150,7 @@ src/nanochat/
 1. ✅ **Entry-point refactor** — training/evaluation split into sub-packages with co-located state classes (`PretrainingState`, `SFTState`, `RLState`)
 2. ✅ **Checkpoint manager** — `CheckpointManager` protocol, typed metadata, `model_factory.py`
 3. ✅ **MLX GPT** — port `models/gpt.py` to `mlx.nn`, validate forward pass matches PyTorch
-4. **MLX Muon** — port optimizer, validate update step matches PyTorch
+4. ✅ **MLX Muon** — port optimizer, validate update step matches PyTorch
 5. **BaseTrainer protocol + TorchTrainer + MLXTrainer** — abstraction grounded in what MLX actually needs
 6. **Backend-agnostic `train_base.py`** — loop calls only protocol methods
 7. **Checkpoint interop** — numpy or safetensors cross-backend handoff
