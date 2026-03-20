@@ -33,6 +33,17 @@ class EvaluationConfig:
         if invalid:
             raise ValueError(f"Invalid eval modes: {invalid}. Valid: {VALID_EVAL_MODES}")
 
+    def validate(self) -> None:
+        """Raise ValueError if any field value is invalid."""
+        if self.max_per_task != -1 and self.max_per_task < 1:
+            raise ValueError(f"evaluation.max_per_task must be -1 or >= 1, got {self.max_per_task}")
+        if self.device_batch_size < 1:
+            raise ValueError(f"evaluation.device_batch_size must be >= 1, got {self.device_batch_size}")
+        if self.split_tokens < 1:
+            raise ValueError(f"evaluation.split_tokens must be >= 1, got {self.split_tokens}")
+        if self.step is not None and self.step < 0:
+            raise ValueError(f"evaluation.step must be >= 0 when set, got {self.step}")
+
     modes: str = "core,bpb,sample"
     hf_path: str | None = None
     step: int | None = None

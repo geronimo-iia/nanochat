@@ -1,6 +1,7 @@
 """Common utilities for nanochat."""
 
 from nanochat.common.distributed import (
+    autodetect_backend,
     autodetect_device_type,
     compute_cleanup,
     compute_init,
@@ -25,6 +26,7 @@ __all__ = [
     "is_ddp_requested",
     "is_ddp_initialized",
     "get_dist_info",
+    "autodetect_backend",
     "autodetect_device_type",
     "compute_init",
     "compute_cleanup",

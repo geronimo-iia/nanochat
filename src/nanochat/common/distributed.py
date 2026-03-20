@@ -45,6 +45,15 @@ def autodetect_device_type() -> str:
     return device_type
 
 
+def autodetect_backend() -> str:
+    """Return 'mlx' if MLX is installed, 'torch' otherwise."""
+    try:
+        import mlx.core  # noqa: F401
+        return "mlx"
+    except ImportError:
+        return "torch"
+
+
 def compute_init(device_type: str = "cuda") -> Tuple[bool, int, int, int, torch.device]:
     """Basic initialization that we keep doing over and over, so make common."""
     setup_default_logging()

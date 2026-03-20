@@ -15,6 +15,21 @@ def test_parse_cli_only_common(tmp_path):
     assert cfg.common.wandb == "disabled"
 
 
+def test_parse_cli_backend(tmp_path):
+    cfg = ConfigLoader().parse(["--base-dir", str(tmp_path), "--backend", "mlx"])
+    assert cfg.common.backend == "mlx"
+
+
+def test_parse_cli_backend_torch(tmp_path):
+    cfg = ConfigLoader().parse(["--base-dir", str(tmp_path), "--backend", "torch"])
+    assert cfg.common.backend == "torch"
+
+
+def test_parse_cli_invalid_backend_raises(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        ConfigLoader().parse(["--base-dir", str(tmp_path), "--backend", "jax"])
+
+
 def test_parse_cli_only_training(tmp_path):
     cfg = ConfigLoader().add_training().parse(["--base-dir", str(tmp_path), "--depth", "6", "--num-iterations", "20"])
     assert cfg.training.depth == 6

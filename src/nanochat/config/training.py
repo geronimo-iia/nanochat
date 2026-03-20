@@ -3,6 +3,9 @@
 import argparse
 from dataclasses import dataclass
 
+_VALID_WINDOW_CHARS = frozenset("LS")
+_VALID_FP8_RECIPES = frozenset({"tensorwise", "rowwise"})
+
 
 @dataclass
 class TrainingConfig:
@@ -119,3 +122,60 @@ class TrainingConfig:
     compression_log_every: int = 100
     track_layer_compression: bool = False
     compression_early_stop: bool = False
+
+    def validate(self) -> None:
+        """Raise ValueError if any field value is invalid or contradictory."""
+        # Architecture
+        for name, val in (("depth", self.depth), ("aspect_ratio", self.aspect_ratio),
+                          ("head_dim", self.head_dim), ("max_seq_len", self.max_seq_len)):
+            if val < 1:
+                raise ValueError(f"training.{name} must be >= 1, got {val}")
+        invalid_chars = set(self.window_pattern) - _VALID_WINDOW_CHARS
+        if not self.window_pattern or invalid_chars:
+            raise ValueError(
+                f"training.window_pattern must be non-empty and contain only 'L'/'S', got {self.window_pattern!r}"
+            )
+        # Horizon — at least one must be active
+        if self.num_iterations != -1 and self.num_iterations < 1:
+            raise ValueError(f"training.num_iterations must be -1 or >= 1, got {self.num_iterations}")
+        if self.target_flops != -1.0 and self.target_flops <= 0:
+            raise ValueError(f"training.target_flops must be -1 or > 0, got {self.target_flops}")
+        if self.target_param_data_ratio <= 0:
+            raise ValueError(f"training.target_param_data_ratio must be > 0, got {self.target_param_data_ratio}")
+        if self.num_iterations == -1 and self.target_flops == -1.0 and self.target_param_data_ratio <= 0:
+            raise ValueError(
+                "training: at least one of num_iterations, target_flops, target_param_data_ratio must be active"
+            )
+        # Batch
+        if self.device_batch_size < 1:
+            raise ValueError(f"training.device_batch_size must be >= 1, got {self.device_batch_size}")
+        if self.total_batch_size != -1 and self.total_batch_size < 1:
+            raise ValueError(f"training.total_batch_size must be -1 or >= 1, got {self.total_batch_size}")
+        # Optimizer
+        for name, val in (("embedding_lr", self.embedding_lr), ("unembedding_lr", self.unembedding_lr),
+                          ("matrix_lr", self.matrix_lr), ("scalar_lr", self.scalar_lr)):
+            if val <= 0:
+                raise ValueError(f"training.{name} must be > 0, got {val}")
+        if self.weight_decay < 0:
+            raise ValueError(f"training.weight_decay must be >= 0, got {self.weight_decay}")
+        if self.warmup_steps < 0:
+            raise ValueError(f"training.warmup_steps must be >= 0, got {self.warmup_steps}")
+        if not 0 < self.warmdown_ratio < 1:
+            raise ValueError(f"training.warmdown_ratio must be in (0, 1), got {self.warmdown_ratio}")
+        if not 0 < self.final_lr_frac < 1:
+            raise ValueError(f"training.final_lr_frac must be in (0, 1), got {self.final_lr_frac}")
+        # Evaluation
+        for name, val in (("eval_every", self.eval_every), ("core_metric_every", self.core_metric_every),
+                          ("sample_every", self.sample_every)):
+            if val != -1 and val < 1:
+                raise ValueError(f"training.{name} must be -1 or >= 1, got {val}")
+        if self.eval_tokens < 1:
+            raise ValueError(f"training.eval_tokens must be >= 1, got {self.eval_tokens}")
+        if self.core_metric_max_per_task < 1:
+            raise ValueError(f"training.core_metric_max_per_task must be >= 1, got {self.core_metric_max_per_task}")
+        # FP8
+        if self.fp8_recipe not in _VALID_FP8_RECIPES:
+            raise ValueError(f"training.fp8_recipe must be one of {sorted(_VALID_FP8_RECIPES)}, got {self.fp8_recipe!r}")
+        # Compression
+        if self.compression_log_every < 1:
+            raise ValueError(f"training.compression_log_every must be >= 1, got {self.compression_log_every}")
