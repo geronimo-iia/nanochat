@@ -77,6 +77,10 @@ class TorchCheckpointManager:
     def exists(self, step: int) -> bool:
         return os.path.exists(os.path.join(self._dir, f"model_{step:06d}.pt"))
 
+    @property
+    def checkpoint_dir(self) -> str:
+        return self._dir
+
     def _prune(self, current_step: int) -> None:
         """Remove oldest checkpoints, keeping only the last keep_last_n."""
         pattern = os.path.join(self._dir, "model_*.pt")

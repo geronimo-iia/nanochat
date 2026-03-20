@@ -6,7 +6,7 @@ import torch.distributed as dist
 
 from nanochat.checkpoint import make_checkpoint_manager
 from nanochat.common import is_ddp_initialized, print0
-from nanochat.evaluation.chat_eval import run_chat_eval
+from nanochat.evaluation.chat.loop import run_chat_eval
 from nanochat.evaluation.engine import Engine
 from nanochat.evaluation.loss_eval import evaluate_bpb
 from nanochat.report import get_report

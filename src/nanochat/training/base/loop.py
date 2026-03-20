@@ -4,7 +4,7 @@ import time
 import torch
 import torch.distributed as dist
 
-from nanochat.checkpoint import make_checkpoint_manager
+from nanochat.checkpoint import CheckpointManager
 from nanochat.common import get_compute_dtype, is_ddp_initialized, print0
 from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine
@@ -15,9 +15,8 @@ from nanochat.training.base.setup import BaseTrainingSetup
 from nanochat.training.compression_metrics import CompressionMetrics
 
 
-def train_loop(s: BaseTrainingSetup) -> None:
+def train_loop(s: BaseTrainingSetup, checkpoint_manager: CheckpointManager) -> None:
     """Run the base pretraining loop. Mutates s.state in place."""
-    checkpoint_manager = make_checkpoint_manager(s.ckpt_dir, s.config.checkpoint)
     compression_tracker = None
     if s.config.training.track_compression:
         compression_tracker = CompressionMetrics(vocab_size=s.tokenizer.get_vocab_size())

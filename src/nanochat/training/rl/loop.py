@@ -3,7 +3,6 @@ from typing import cast
 import torch
 import torch.distributed as dist
 
-from nanochat import workspace
 from nanochat.checkpoint import make_checkpoint_manager
 from nanochat.common import print0
 from nanochat.report import get_report
@@ -15,9 +14,7 @@ from nanochat.training.rl.setup import RLTrainingSetup
 def rl_train_loop(s: RLTrainingSetup) -> None:
     config = s.config
     state = s.state
-    depth = s.model.config.n_layer  # type: ignore[union-attr]
-    ckpt_dir = workspace.checkpoint_dir("rl", config.common.model_tag or f"d{depth}")
-    checkpoint_manager = make_checkpoint_manager(ckpt_dir, config.checkpoint)
+    checkpoint_manager = make_checkpoint_manager(s.ckpt_dir, config.checkpoint)
 
     batch_iterator = get_batch(
         state=state,
@@ -123,6 +120,6 @@ def rl_train_loop(s: RLTrainingSetup) -> None:
             or step == s.num_steps - 1
         ):
             checkpoint_manager.save(state, s.model.state_dict(), None)  # type: ignore[union-attr]
-            print(f"✅ Saved model checkpoint to {ckpt_dir}")
+            print(f"✅ Saved model checkpoint to {s.ckpt_dir}")
 
     get_report().log(section="Chat RL", data=[s.user_config])

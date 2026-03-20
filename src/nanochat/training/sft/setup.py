@@ -152,7 +152,7 @@ def setup(config: Config) -> SFTTrainingSetup:
         )
 
     model, tokenizer, meta = load_model_from_dir(
-        device=device, phase="base", model_tag=config.common.model_tag, step=config.sft.source_step
+        device=device, phase="base", config=config.checkpoint, model_tag=config.common.model_tag, step=config.sft.source_step
     )
 
     # Inherit training hyperparameters from pretrained checkpoint
@@ -203,6 +203,7 @@ def setup(config: Config) -> SFTTrainingSetup:
             source="base",
             device=device,
             rank=ddp_rank,
+            config=config.checkpoint,
             model_tag=config.common.model_tag,
             step=config.sft.source_step,
         )

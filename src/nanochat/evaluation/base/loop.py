@@ -32,6 +32,7 @@ def run_base_eval(config: Config) -> None:
         model, tokenizer, meta = load_model_from_dir(
             phase="base",
             device=device,
+            config=config.checkpoint,
             model_tag=config.common.model_tag,
             step=config.evaluation.step,
         )

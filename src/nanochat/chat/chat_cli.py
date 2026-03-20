@@ -31,7 +31,7 @@ def chat_cli(
     # Init the model and tokenizer
     device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
     _, _, _, _, device = compute_init(device_type)
-    model, tokenizer, _ = load_model_from_dir(phase=source, device=device, model_tag=model_tag, step=step)
+    model, tokenizer, _ = load_model_from_dir(phase=source, device=device, config=config.checkpoint, model_tag=model_tag, step=step)
 
     # Special tokens for the chat state machine
     bos = tokenizer.get_bos_token_id()
