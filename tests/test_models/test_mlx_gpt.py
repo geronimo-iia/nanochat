@@ -1,0 +1,213 @@
+"""Tests for MLX GPT model."""
+
+import pytest
+
+pytest.importorskip("mlx", reason="MLX not installed")
+
+import mlx.core as mx
+import mlx.nn as mlx_nn
+import numpy as np
+import torch
+
+from nanochat.models.config import GPTConfig
+from nanochat.models.mlx_gpt import GPT as MLXGPT
+from nanochat.models import GPT as TorchGPT
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+SMALL_CONFIG = GPTConfig(
+    sequence_len=64,
+    vocab_size=128,
+    n_layer=4,
+    n_embd=128,
+    n_head=4,
+    n_kv_head=4,
+    window_pattern="SL",
+)
+
+GQA_CONFIG = GPTConfig(
+    sequence_len=64,
+    vocab_size=128,
+    n_layer=4,
+    n_embd=128,
+    n_head=4,
+    n_kv_head=2,
+    window_pattern="SL",
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _copy_weights_torch_to_mlx(torch_model: TorchGPT, mlx_model: MLXGPT) -> None:
+    """Copy all weights from PyTorch model to MLX model via numpy."""
+    n_layer = torch_model.config.n_layer
+    head_dim = torch_model.config.n_embd // torch_model.config.n_head
+
+    def t2m(tensor: torch.Tensor) -> mx.array:
+        return mx.array(tensor.detach().float().numpy())
+
+    # Embeddings
+    mlx_model.wte.weight = t2m(torch_model.transformer.wte.weight)
+    mlx_model.lm_head.weight = t2m(torch_model.lm_head.weight)
+
+    # Value embeddings
+    for i in range(n_layer):
+        key = str(i)
+        if key in mlx_model.value_embeds:
+            mlx_model.value_embeds[key].weight = t2m(torch_model.value_embeds[key].weight)
+
+    # Blocks
+    for i, (torch_block, mlx_block) in enumerate(zip(torch_model.transformer.h, mlx_model.blocks)):
+        a_t, a_m = torch_block.attn, mlx_block.attn
+        mlx_block.attn.c_q.weight = t2m(a_t.c_q.weight)
+        mlx_block.attn.c_k.weight = t2m(a_t.c_k.weight)
+        mlx_block.attn.c_v.weight = t2m(a_t.c_v.weight)
+        mlx_block.attn.c_proj.weight = t2m(a_t.c_proj.weight)
+        if a_m.ve_gate is not None:
+            mlx_block.attn.ve_gate.weight = t2m(a_t.ve_gate.weight)
+        mlx_block.mlp.c_fc.weight = t2m(torch_block.mlp.c_fc.weight)
+        mlx_block.mlp.c_proj.weight = t2m(torch_block.mlp.c_proj.weight)
+
+    # Scalars
+    mlx_model.resid_lambdas = t2m(torch_model.resid_lambdas)
+    mlx_model.x0_lambdas = t2m(torch_model.x0_lambdas)
+    mlx_model.smear_gate.weight = t2m(torch_model.smear_gate.weight)
+    mlx_model.smear_lambda = t2m(torch_model.smear_lambda)
+    mlx_model.backout_lambda = t2m(torch_model.backout_lambda)
+
+    # Rotary embeddings
+    mlx_model.cos, mlx_model.sin = mlx_model._precompute_rotary(
+        torch_model.config.sequence_len * mlx_model.ROTARY_OVERSHOOT, head_dim
+    )
+
+    mx.eval(mlx_model.parameters())
+
+
+# ---------------------------------------------------------------------------
+# Shape / smoke tests (no PyTorch dependency)
+# ---------------------------------------------------------------------------
+
+def test_forward_logits_shape():
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (2, 64)))
+    logits = model(idx)
+    mx.eval(logits)
+    assert logits.shape == (2, 64, 128)
+
+
+def test_forward_loss_scalar():
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (2, 64)))
+    targets = mx.array(np.random.randint(0, 128, (2, 64)))
+    loss = model(idx, targets)
+    mx.eval(loss)
+    assert loss.shape == ()
+    assert float(loss) > 0
+
+
+def test_forward_gqa():
+    model = MLXGPT(GQA_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (2, 64)))
+    logits = model(idx)
+    mx.eval(logits)
+    assert logits.shape == (2, 64, 128)
+
+
+def test_forward_short_sequence():
+    """T < sequence_len should work (mask computed on the fly)."""
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (1, 16)))
+    logits = model(idx)
+    mx.eval(logits)
+    assert logits.shape == (1, 16, 128)
+
+
+def test_no_nan_in_logits():
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (2, 64)))
+    logits = model(idx)
+    mx.eval(logits)
+    assert not mx.any(mx.isnan(logits)).item()
+
+
+def test_softcap_bounds():
+    """Logits must be in (-softcap, +softcap)."""
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (2, 64)))
+    logits = model(idx)
+    mx.eval(logits)
+    cap = MLXGPT.SOFTCAP
+    assert float(mx.max(logits).item()) < cap
+    assert float(mx.min(logits).item()) > -cap
+
+
+def test_trainable_parameters_present():
+    """All expected parameter groups must appear in trainable_parameters."""
+    model = MLXGPT(SMALL_CONFIG)
+    params = dict(mlx_nn.utils.tree_flatten(model.trainable_parameters()))
+    keys = "\n".join(params.keys())
+    assert "wte" in keys
+    assert "lm_head" in keys
+    assert "blocks" in keys
+    assert "value_embeds" in keys
+
+
+# ---------------------------------------------------------------------------
+# Numeric validation against PyTorch
+# ---------------------------------------------------------------------------
+
+def test_numeric_match_pytorch():
+    """Forward pass logits must match PyTorch within 1e-3 (bf16 tolerance)."""
+    config = SMALL_CONFIG
+
+    torch_model = TorchGPT(config)
+    torch_model.init_weights()
+    torch_model.eval()
+
+    mlx_model = MLXGPT(config)
+    _copy_weights_torch_to_mlx(torch_model, mlx_model)
+
+    rng = np.random.default_rng(42)
+    tokens_np = rng.integers(0, config.vocab_size, size=(1, config.sequence_len))
+
+    # PyTorch forward (float32)
+    with torch.no_grad():
+        torch_logits = torch_model(torch.tensor(tokens_np, dtype=torch.long)).float().numpy()
+
+    # MLX forward (float32)
+    mlx_out = mlx_model(mx.array(tokens_np))
+    mx.eval(mlx_out)
+    mlx_logits = np.array(mlx_out)
+
+    max_diff = np.max(np.abs(torch_logits - mlx_logits))
+    assert max_diff < 1e-3, f"Max logit diff {max_diff:.6f} exceeds 1e-3"
+
+
+def test_numeric_match_pytorch_gqa():  # noqa: PLR0914
+    """Numeric match with GQA (n_kv_head < n_head)."""
+    config = GQA_CONFIG
+
+    torch_model = TorchGPT(config)
+    torch_model.init_weights()
+    torch_model.eval()
+
+    mlx_model = MLXGPT(config)
+    _copy_weights_torch_to_mlx(torch_model, mlx_model)
+
+    rng = np.random.default_rng(0)
+    tokens_np = rng.integers(0, config.vocab_size, size=(1, config.sequence_len))
+
+    with torch.no_grad():
+        torch_logits = torch_model(torch.tensor(tokens_np, dtype=torch.long)).float().numpy()
+
+    mlx_out = mlx_model(mx.array(tokens_np))
+    mx.eval(mlx_out)
+    mlx_logits = np.array(mlx_out)
+
+    max_diff = np.max(np.abs(torch_logits - mlx_logits))
+    assert max_diff < 1e-3, f"Max logit diff {max_diff:.6f} exceeds 1e-3"
