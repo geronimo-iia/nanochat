@@ -24,7 +24,10 @@ def find_largest_model(checkpoints_dir: str) -> str:
 
 def find_last_step(checkpoint_dir: str) -> int:
     """Return the highest step number found in checkpoint_dir."""
-    checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "model_*.pt"))
+    checkpoint_files = [
+        *glob.glob(os.path.join(checkpoint_dir, "model_*.pt")),
+        *glob.glob(os.path.join(checkpoint_dir, "model_*.safetensors")),
+    ]
     if not checkpoint_files:
         raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
-    return int(max(os.path.basename(f).split("_")[-1].split(".")[0] for f in checkpoint_files))
+    return int(max(os.path.basename(f).split("_")[1].split(".")[0] for f in checkpoint_files))

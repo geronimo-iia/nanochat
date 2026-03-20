@@ -12,6 +12,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from nanochat.checkpoint.convert import from_numpy_torch
+
 from nanochat.common import get_compute_dtype, is_ddp_initialized
 from nanochat.models.gpt import GPT
 from nanochat.training.base.fp8 import disable_fp8
@@ -120,6 +122,8 @@ class TorchTrainer:
         return self._optimizer.state_dict()
 
     def load_state_dicts(self, model_state: dict[str, Any], optimizer_state: dict[str, Any]) -> None:
+        if any(isinstance(v, np.ndarray) for v in model_state.values()):
+            model_state = from_numpy_torch(model_state)
         self._orig_model.load_state_dict(model_state, strict=True, assign=True)
         self._optimizer.load_state_dict(optimizer_state)
 

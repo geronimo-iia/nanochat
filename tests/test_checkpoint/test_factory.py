@@ -13,5 +13,5 @@ def test_torch_format_returns_torch_manager(tmp_path):
 
 
 def test_unknown_format_raises(tmp_path):
-    with pytest.raises(ValueError, match="safetensors"):
-        make_checkpoint_manager(str(tmp_path), CheckpointConfig(format="safetensors"))
+    with pytest.raises(ValueError, match="Unsupported"):
+        make_checkpoint_manager(str(tmp_path), CheckpointConfig(format="unknown"))
