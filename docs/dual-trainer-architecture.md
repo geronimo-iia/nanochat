@@ -6,7 +6,7 @@ read_when:
   - Adding a new training backend
   - Understanding how MLX training integrates with nanochat
 status: draft
-last_updated: "2025-07-19"
+last_updated: "2025-07-20"
 ---
 
 # Dual Trainer Architecture
@@ -280,13 +280,65 @@ After implementing `mlx_gpt.py`, validate numerics against PyTorch before any tr
 
 This validation lives in `tests/test_models/test_mlx_gpt.py` and is skipped when MLX is not installed.
 
-### Open questions to resolve before coding
+### Open questions resolved
 
 - ✅ `mx.fast.scaled_dot_product_attention` supports GQA natively
 - ✅ Sliding window implemented via boolean causal mask — no native parameter needed
 - ✅ `nn.value_and_grad(model, fn)` is the correct API for training
-- Does `mx.nn.value_and_grad` handle grad accumulation, or do we accumulate manually?
-- MLX arrays are lazy — `mx.eval()` must be called explicitly; determine the right cadence in the training loop
+- ✅ Grad accumulation is manual — each call returns a fresh independent grad tree, no state on parameters
+- ✅ `mx.eval()` must be called after each microbatch — see MLX Training Patterns section
+
+---
+
+## MLX Training Patterns
+
+These patterns apply to `MLXTrainer.forward_backward` and any MLX training code.
+
+### Grad accumulation
+
+`nn.value_and_grad` does **not** accumulate. Each call returns a fresh, independent grad tree.
+MLX has no `.grad` attribute on parameters — there is no state to accumulate into.
+
+Manual accumulation with `nn.utils.tree_map`:
+
+```python
+loss_and_grad = nn.value_and_grad(model, model)
+
+accumulated_grads = None
+total_loss = 0.0
+
+for x, y in microbatches:
+    loss, grads = loss_and_grad(x, y)
+    mx.eval(loss, grads)  # must eval each microbatch — see below
+    total_loss += loss.item()
+    if accumulated_grads is None:
+        accumulated_grads = grads
+    else:
+        accumulated_grads = nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
+
+mean_grads = nn.utils.tree_map(lambda g: g / n_microbatches, accumulated_grads)
+optimizer.update(model, mean_grads)
+mx.eval(model.parameters())
+```
+
+### `mx.eval()` cadence
+
+MLX is lazy — operations build a compute graph but nothing executes until `mx.eval()` is called.
+Without an explicit eval between microbatches, the graph grows unboundedly in memory before
+anything runs. The correct cadence:
+
+| When | What to eval |
+|---|---|
+| After each microbatch forward/backward | `mx.eval(loss, grads)` |
+| After optimizer update | `mx.eval(model.parameters())` |
+| Before logging a loss value | `loss.item()` triggers eval implicitly |
+
+Do **not** defer all evals to the end of the accumulation loop.
+
+### Tree utilities
+
+`nn.utils.tree_map` is the correct function for operating over grad trees.
+`mx.tree_map` does not exist — using it will raise `AttributeError`.
 
 ---
 
@@ -299,5 +351,3 @@ _To be written after MLX GPT forward pass is validated._
 ## Open questions
 
 - Should MLXTrainer support the compression metrics tracker, or defer that?
-- Does `mx.nn.value_and_grad` handle grad accumulation, or do we accumulate manually?
-- MLX arrays are lazy — `mx.eval()` must be called explicitly; determine the right cadence in the training loop
