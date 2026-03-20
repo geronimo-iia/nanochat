@@ -6,7 +6,7 @@ read_when:
   - Finding the right sub-document for a specific component
   - Reviewing implementation order and status
 status: active
-last_updated: "2025-07-23"
+last_updated: "2025-07-24"
 ---
 
 # Dual Trainer Architecture
@@ -81,13 +81,45 @@ See [trainer-implementation-plan.md](trainer-implementation-plan.md) for the ful
 
 ## Checkpoint interop
 
-Two options for cross-backend checkpoint exchange:
+Goal: a checkpoint written by `TorchTrainer` can be loaded by `MLXTrainer` and vice versa,
+without either trainer knowing about the other's array type.
 
-**Option A — numpy arrays**: `state_dict()` returns numpy arrays. Both PyTorch and MLX can read/write numpy natively.
-- PyTorch → MLX: `torch.Tensor.numpy()` → `mx.array()`
-- MLX → PyTorch: `np.array(mx_tensor)` → `torch.from_numpy()`
+### Design
 
-**Option B — safetensors**: Both frameworks support safetensors natively. Memory-mapped, zero-copy, compatible with `mlx-lm` tooling. Preferred for ecosystem compatibility.
+The manager is the conversion boundary. `load()` always returns `dict[str, np.ndarray]` for
+model state — numpy is the common currency both frameworks can consume. Each trainer's
+`load_state_dicts` converts from numpy to its native type. Neither trainer needs to know what
+format was on disk or what the other backend uses.
+
+Option B (safetensors) is the on-disk format: memory-mapped, zero-copy, compatible with
+`mlx-lm` tooling, and natively supported by both PyTorch and MLX. Optimizer state uses `.npz`
+(numpy archive) since optimizer tensors are framework-specific and not shared across backends.
+
+### Conversion boundary
+
+```
+disk (.safetensors)  →  manager.load()  →  dict[str, np.ndarray]
+                                                    ↓
+                              TorchTrainer.load_state_dicts()  →  torch.Tensor
+                              MLXTrainer.load_state_dicts()    →  mx.array
+```
+
+Saving is the mirror: each trainer's `model_state_dict()` returns its native type, and
+`convert.to_numpy()` is called by the manager before writing to disk.
+
+### Files
+
+| File | Role |
+|---|---|
+| `checkpoint/convert.py` | `to_numpy(state_dict)` and `from_numpy(state_dict, framework)` — handles `torch.Tensor`, `mx.array`, `np.ndarray` |
+| `checkpoint/safetensors_manager.py` | `SafetensorsCheckpointManager` — model as `.safetensors`, optimizer as `.npz`, meta as `.json` |
+| `checkpoint/factory.py` | add `"safetensors"` branch |
+| `checkpoint/__init__.py` | re-export `SafetensorsCheckpointManager` |
+| `pyproject.toml` | add `safetensors` dependency |
+| `tests/test_checkpoint/test_safetensors_manager.py` | round-trip, weights restored, prune, exists |
+
+`compat.py` torch-specific patches are unchanged — they are called from `TorchTrainer.load_state_dicts`
+which already speaks torch tensors after conversion.
 
 ---
 
