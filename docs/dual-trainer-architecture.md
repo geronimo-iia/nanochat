@@ -5,8 +5,8 @@ read_when:
   - Getting an overview of the dual-trainer architecture
   - Finding the right sub-document for a specific component
   - Reviewing implementation order and status
-status: draft
-last_updated: "2025-07-22"
+status: active
+last_updated: "2025-07-23"
 ---
 
 # Dual Trainer Architecture
@@ -120,7 +120,7 @@ src/nanochat/
 2. ✅ **Checkpoint manager** — `CheckpointManager` protocol, typed metadata, `model_factory.py`
 3. ✅ **MLX GPT** — see [mlx-gpt-design.md](mlx-gpt-design.md)
 4. ✅ **MLX Muon** — see [mlx-muon-design.md](mlx-muon-design.md)
-5. **BaseTrainer + TorchTrainer** — see [trainer-implementation-plan.md](trainer-implementation-plan.md)
-6. **Backend-agnostic `loop.py`** — loop calls only protocol methods
+5. ✅ **BaseTrainer + TorchTrainer** — see [trainer-implementation-plan.md](trainer-implementation-plan.md)
+6. ✅ **Backend-agnostic `loop.py`** — loop calls only protocol methods
 7. **Checkpoint interop** — numpy or safetensors cross-backend handoff
 8. ✅ **CLI integration** — see [cli-backend-integration.md](cli-backend-integration.md)
