@@ -148,8 +148,7 @@ class MuonAdamW:
         out = []
         for adamw in self._adamw:
             if adamw is not None:
-                flat, _ = nn.utils.tree_flatten(adamw.state)
-                out.extend(v for v in flat if isinstance(v, mx.array))
+                out.extend(v for _, v in nn.utils.tree_flatten(adamw.state) if isinstance(v, mx.array))
         for s in self._muon_state.values():
             out.extend(s.values())
         return out
