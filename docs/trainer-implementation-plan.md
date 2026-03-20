@@ -290,6 +290,6 @@ Model construction, FP8 conversion, `torch.compile`, optimizer construction, dat
 - [x] `TorchTrainer.__init__` asserts `"initial_lr"` present on all param groups
 - [x] Full suite passes with `TorchTrainer` wired into `BaseTrainingSetup`
 - [x] Resume from checkpoint restores correct dataloader position — no-repeat verified (`dev/verify_dataloader_resume.py`). Note: resume is approximate (buffer-based packing), exact batch reproduction is not guaranteed by design.
-- [ ] Single-process run (no DDP) completes without hang in `step`
+- [x] Single-process run (no DDP) completes without hang in `step` — verified (`dev/verify_single_process_step.py`)
 - [x] `eval_context` leaves model in train mode after exit (including on exception)
 - [ ] End-to-end parity test: 10-step loss trajectory matches pre-refactor reference
