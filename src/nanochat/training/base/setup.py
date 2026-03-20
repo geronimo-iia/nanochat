@@ -203,10 +203,12 @@ def _setup_torch(
     tokenizer: object,
     resuming: bool,
     resume_ckpt: object,
+    device_type: str,
+    ddp_rank: int,
+    ddp_world_size: int,
+    device: torch.device,
 ) -> tuple[BaseTrainer, str, int, int, torch.device, Callable, Callable, float]:
     """Build TorchTrainer. Returns (trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops)."""
-    device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
-    _, ddp_rank, _, ddp_world_size, device = compute_init(device_type)
     synchronize, get_max_memory = get_device_sync(device_type)
 
     if device_type == "cuda":
@@ -457,15 +459,25 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
     print0(f"Total training FLOPs estimate: {num_flops_per_token * total_tokens:e}")
 
     tokens_per_fwdbwd = config.training.device_batch_size * config.training.max_seq_len
-    # DDP world size is 1 for MLX — resolved after backend dispatch, use 1 for grad_accum_steps here
-    ddp_world_size_for_accum = 1 if backend == "mlx" else None  # resolved below for torch
-    if ddp_world_size_for_accum is None:
-        # Torch: need to init compute to know world size — defer grad_accum_steps to _setup_torch
-        # Use a placeholder; _setup_torch will assert the division holds
-        ddp_world_size_for_accum = 1  # will be overridden
+
+    # For the torch path we need ddp_world_size to compute grad_accum_steps correctly.
+    # Resolve it here before the backend dispatch so both paths share the same calculation.
+    if backend == "mlx":
+        ddp_world_size_for_accum = 1
+        _torch_device_type = ""
+        _torch_ddp_rank = 0
+        _torch_ddp_world_size = 1
+        _torch_device: torch.device = torch.device("cpu")
+    else:
+        _torch_device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
+        _, _torch_ddp_rank, _, _torch_ddp_world_size, _torch_device = compute_init(_torch_device_type)
+        ddp_world_size_for_accum = _torch_ddp_world_size
+
     world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size_for_accum
-    assert total_batch_size % tokens_per_fwdbwd == 0
-    grad_accum_steps = total_batch_size // tokens_per_fwdbwd  # per-rank, corrected in torch path
+    assert total_batch_size % world_tokens_per_fwdbwd == 0, (
+        f"total_batch_size {total_batch_size} not divisible by world_tokens_per_fwdbwd {world_tokens_per_fwdbwd}"
+    )
+    grad_accum_steps = total_batch_size // world_tokens_per_fwdbwd
 
     ckpt_dir = checkpoint_manager.checkpoint_dir
     config.save(Path(ckpt_dir) / "config.toml")
@@ -505,10 +517,14 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
             vocab_size=vocab_size,
             weight_decay_scaled=weight_decay_scaled,
             batch_lr_scale=batch_lr_scale,
-            grad_accum_steps=total_batch_size // (tokens_per_fwdbwd),  # corrected after ddp_world_size known
+            grad_accum_steps=grad_accum_steps,
             tokenizer=tokenizer,
             resuming=resuming,
             resume_ckpt=resume_ckpt,
+            device_type=_torch_device_type,
+            ddp_rank=_torch_ddp_rank,
+            ddp_world_size=_torch_ddp_world_size,
+            device=_torch_device,
         )
         token_bytes = get_token_bytes(device=device)
         master_process = ddp_rank == 0
