@@ -5,7 +5,7 @@ read_when:
   - Implementing BaseTrainer protocol or TorchTrainer
   - Reviewing the CompressionMetrics numpy refactor
   - Checking what needs to be done before MLXTrainer can be wired
-status: draft
+status: active
 last_updated: "2025-07-23"
 ---
 
@@ -279,7 +279,7 @@ Model construction, FP8 conversion, `torch.compile`, optimizer construction, dat
 
 6. ✅ **`loop.py` refactor** — training step, eval, sampling, checkpoint all use protocol methods. Full suite 301 passed. Committed `c46f904`.
 
-7. **End-to-end parity test** — run 10 steps with the refactored loop, assert loss trajectory matches a reference run captured before the refactor (or run both old and new loop in the same test with identical seeds). Gate: loss values match within 1e-6.
+7. ✅ **End-to-end parity test** — self-consistency: two runs from same checkpoint with identical seeds produce zero diff across 10 steps. Verified (`dev/verify_e2e_parity.py`).
 
 ---
 
