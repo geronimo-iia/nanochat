@@ -2,109 +2,84 @@
 
 import os
 import tempfile
-from typing import cast
+from typing import Self, cast
 
 import torch
 
+from nanochat.checkpoint.factory import make_checkpoint_manager
+from nanochat.checkpoint.protocol import CheckpointMetadata, LoopState
+from nanochat.config.checkpoint import CheckpointConfig
 from nanochat.models import GPT, GPTConfig
 from nanochat.models.gpt import Block
-from nanochat.training.checkpoint import load_checkpoint, save_checkpoint
+
+
+class _State:
+    def __init__(self, step: int) -> None:
+        self.step = step
+
+    @classmethod
+    def fresh(cls) -> Self:
+        return cls(0)
+
+    def to_metadata(self) -> CheckpointMetadata:
+        return CheckpointMetadata(
+            step=self.step,
+            model_config={},
+            user_config={"test": "value", "step": self.step},
+            loop_state=LoopState(min_val_bpb=0.0, smooth_train_loss=0.0, total_training_time=0.0),
+        )
+
+    @classmethod
+    def from_metadata(cls, meta: CheckpointMetadata) -> Self:
+        return cls(meta.step)
+
+
+def _config() -> CheckpointConfig:
+    return CheckpointConfig()
 
 
 def test_checkpoint_save_load():
     """Test checkpoint can be saved and loaded."""
-    config = GPTConfig(
-        sequence_len=128,
-        vocab_size=500,
-        n_layer=2,
-        n_embd=128,
-        n_head=2,
-        n_kv_head=2,
-    )
-    model = GPT(config)
+    gpt_config = GPTConfig(sequence_len=128, vocab_size=500, n_layer=2, n_embd=128, n_head=2, n_kv_head=2)
+    model = GPT(gpt_config)
     model.init_weights()
-
     optimizer = model.setup_optimizer(
-        matrix_lr=0.02,
-        embedding_lr=0.3,
-        unembedding_lr=0.008,
-        scalar_lr=0.5,
-        weight_decay=0.0,
+        matrix_lr=0.02, embedding_lr=0.3, unembedding_lr=0.008, scalar_lr=0.5, weight_decay=0.0
     )
 
-    # Save checkpoint
     with tempfile.TemporaryDirectory() as tmpdir:
-        save_checkpoint(
-            tmpdir,
-            step=100,
-            model_data=model.state_dict(),
-            optimizer_data=optimizer.state_dict(),
-            meta_data={"test": "value", "step": 100},
-            rank=0,
-        )
+        manager = make_checkpoint_manager(tmpdir, _config())
+        state = _State(100)
+        manager.save(state, model.state_dict(), optimizer.state_dict(), rank=0)
 
-        # Check files exist
         assert os.path.exists(os.path.join(tmpdir, "model_000100.pt"))
         assert os.path.exists(os.path.join(tmpdir, "optim_000100_rank0.pt"))
         assert os.path.exists(os.path.join(tmpdir, "meta_000100.json"))
 
-        # Load checkpoint
-        model_data, optimizer_data, meta_data = load_checkpoint(
-            tmpdir,
-            step=100,
-            device=torch.device("cpu"),
-            load_optimizer=True,
-            rank=0,
-        )
+        ckpt = manager.load(step=100, device=torch.device("cpu"), load_optimizer=True, rank=0)
 
-        assert model_data is not None
-        assert optimizer_data is not None
-        assert meta_data is not None
-        assert meta_data["test"] == "value"
-        assert meta_data["step"] == 100
+        assert ckpt.model_state is not None
+        assert ckpt.optimizer_state is not None
+        assert ckpt.metadata.user_config["test"] == "value"
+        assert ckpt.metadata.step == 100
 
 
 def test_checkpoint_model_restore():
     """Test model weights are correctly restored from checkpoint."""
-    config = GPTConfig(
-        sequence_len=64,
-        vocab_size=200,
-        n_layer=2,
-        n_embd=64,
-        n_head=2,
-        n_kv_head=2,
-    )
-    model1 = GPT(config)
+    gpt_config = GPTConfig(sequence_len=64, vocab_size=200, n_layer=2, n_embd=64, n_head=2, n_kv_head=2)
+    model1 = GPT(gpt_config)
     model1.init_weights()
-
-    # Get initial weights from first layer
     initial_weight = cast(Block, cast(torch.nn.ModuleList, model1.transformer.h)[0]).attn.c_q.weight.clone()
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Save
-        save_checkpoint(
-            tmpdir,
-            step=50,
-            model_data=model1.state_dict(),
-            optimizer_data={},
-            meta_data={"step": 50},
-            rank=0,
-        )
+        manager = make_checkpoint_manager(tmpdir, _config())
+        manager.save(_State(50), model1.state_dict(), None, rank=0)
 
-        # Create new model and load
-        model2 = GPT(config)
-        model2.init_weights()  # Initialize with different weights
+        model2 = GPT(gpt_config)
+        model2.init_weights()
 
-        model_data, _, _ = load_checkpoint(
-            tmpdir,
-            step=50,
-            device=torch.device("cpu"),
-            load_optimizer=False,
-            rank=0,
-        )
+        ckpt = manager.load(step=50, device=torch.device("cpu"), load_optimizer=False)
+        model2.load_state_dict(ckpt.model_state)
 
-        model2.load_state_dict(model_data)
-
-        # Check weights match
         restored_weight = cast(Block, cast(torch.nn.ModuleList, model2.transformer.h)[0]).attn.c_q.weight
         assert torch.allclose(initial_weight, restored_weight)
