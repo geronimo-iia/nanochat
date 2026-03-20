@@ -2,20 +2,17 @@ version = 1
 revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
-    "sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps'",
-    "sys_platform != 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps'",
-    "sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
-    "sys_platform != 'linux' and extra != 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
-    "sys_platform == 'linux' and extra == 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
-    "sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
-    "sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
-    "sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
-    "sys_platform != 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu' and extra != 'extra-8-nanochat-mps'",
+    "sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu'",
+    "sys_platform != 'linux' and extra != 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu'",
+    "sys_platform == 'linux' and extra == 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu'",
+    "sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu'",
+    "sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu'",
+    "sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu'",
+    "sys_platform != 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu'",
 ]
 conflicts = [[
     { package = "nanochat", extra = "cpu" },
     { package = "nanochat", extra = "gpu" },
-    { package = "nanochat", extra = "mps" },
 ]]
 
 [[package]]
@@ -136,7 +133,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -212,7 +209,7 @@ name = "click"
 version = "8.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/60/6c/8ca2efa64cf75a977a0d7fac081354553ebe483345c734fb6b6515d96bbc/click-8.2.1.tar.gz", hash = "sha256:27c491cc05d968d271d5a1db13e3b5a184636d9d930f148c50b038f0d0646202", size = 286342, upload-time = "2025-05-20T23:19:49.832Z" }
 wheels = [
@@ -606,7 +603,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "requests" },
@@ -641,7 +638,7 @@ name = "ipykernel"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "appnope", marker = "sys_platform == 'darwin' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "appnope", marker = "sys_platform == 'darwin' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
     { name = "comm" },
     { name = "debugpy" },
     { name = "ipython" },
@@ -665,12 +662,12 @@ name = "ipython"
 version = "9.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
     { name = "decorator" },
     { name = "ipython-pygments-lexers" },
     { name = "jedi" },
     { name = "matplotlib-inline" },
-    { name = "pexpect", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'emscripten' and extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (sys_platform == 'emscripten' and extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (sys_platform == 'win32' and extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (sys_platform == 'win32' and extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (sys_platform == 'win32' and extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "pexpect", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'emscripten' and extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (sys_platform == 'win32' and extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
     { name = "prompt-toolkit" },
     { name = "pygments" },
     { name = "stack-data" },
@@ -907,6 +904,36 @@ wheels = [
 ]
 
 [[package]]
+name = "mlx"
+version = "0.31.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mlx-metal", marker = "sys_platform == 'darwin' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/45/04465da443634b23fb11670bbd2f7538b1ed43ffc5e0de44a95b3c29e9c1/mlx-0.31.1-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:9a6d3410fc951bd28508fed9c1ab5d9903f6f6bb101c3a5d63d4191d49a384a1", size = 574268, upload-time = "2026-03-12T02:16:17.27Z" },
+    { url = "https://files.pythonhosted.org/packages/85/7b/84956960356ff36e8c1bbed68fac96709e98e6a1adbc8e3d0ff71022d84e/mlx-0.31.1-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:20bd7ba19882603ac22711092d0e799f1ff7b5183c2c641d417dab4d2423d99e", size = 574265, upload-time = "2026-03-12T02:16:18.479Z" },
+    { url = "https://files.pythonhosted.org/packages/86/01/d6f0ef5b8c0b390af08246d1301e9717dfb076b3920012b53105a888ed8c/mlx-0.31.1-cp313-cp313-macosx_26_0_arm64.whl", hash = "sha256:4c4565d6f4f8ce295613ee342d313ee5ab0b0eab9a6272954450f8343f7876bc", size = 574172, upload-time = "2026-03-12T02:16:19.898Z" },
+    { url = "https://files.pythonhosted.org/packages/df/05/eb29e9eb0cff9c7dfd872e26663e6e9512629730740e1db629086c80ac5a/mlx-0.31.1-cp313-cp313-manylinux_2_35_aarch64.whl", hash = "sha256:9dc564a8b38b9aec279a1c7d34551068b1cc1f8e43b5ac044b56b2a9a4205195", size = 626558, upload-time = "2026-03-12T02:16:21.652Z" },
+    { url = "https://files.pythonhosted.org/packages/25/45/ecb746fbb6acb75d03760e41cc7bd21c2e2b544528b3033f7d70402334ac/mlx-0.31.1-cp313-cp313-manylinux_2_35_x86_64.whl", hash = "sha256:78f51ab929278366006ee7793dbb5c942b121542c793c33eb9b894a2ce8e27e1", size = 668625, upload-time = "2026-03-12T02:16:23.103Z" },
+    { url = "https://files.pythonhosted.org/packages/99/65/208f511acd5fb1ed0b08f047bd6229583845cc6f4b5aa6547a3219332dbb/mlx-0.31.1-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:bba9d471ba20e050676292b1089a355c8042d3fc9462e4c1738a9735d7d40cfa", size = 576300, upload-time = "2026-03-12T02:16:24.545Z" },
+    { url = "https://files.pythonhosted.org/packages/98/58/2d925cb3fa3cd28d279ed6f44508ab7fbbf7359b17359914aa3652a7d734/mlx-0.31.1-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:d90b0529b22553eb1353b113b7233aa391ca55e24b1ba69024c732fcc21c5c49", size = 576303, upload-time = "2026-03-12T02:16:26.283Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/17/abec0bd0f9347dae13e60b33325cb199312798842901953495e19f3bb3c8/mlx-0.31.1-cp314-cp314-macosx_26_0_arm64.whl", hash = "sha256:69bc88b41ddd61b44cd6a4d417790f9971ba3fdf58d824934cea95a95b9b4031", size = 576275, upload-time = "2026-03-12T02:16:27.57Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/91/85c73f7cc3a661416d05315623458c719eda7de958b05f4e10ba40c52d07/mlx-0.31.1-cp314-cp314-manylinux_2_35_aarch64.whl", hash = "sha256:b973506fd49ba39df6dc4ff655b77bd35ea193cee878e71d6ee3d1a951d2b3a6", size = 628701, upload-time = "2026-03-12T02:16:28.949Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/e9/d87638e00a44dcf346fe838caaf1e2dae96a88d5779edbd66ce27d4bbdcc/mlx-0.31.1-cp314-cp314-manylinux_2_35_x86_64.whl", hash = "sha256:3987282a1e63252bdd7c636138812c67316c3f7c7a7acad08e76c8843648a056", size = 668959, upload-time = "2026-03-12T02:16:30.41Z" },
+]
+
+[[package]]
+name = "mlx-metal"
+version = "0.31.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/66/2313497fdbc7fbadf8e026c09366e3f049f9114e65ca4edc23cdb8699186/mlx_metal-0.31.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:70741174131dbf7fdd479cb730e06e08c358eac3bf7905d9e884e7960cfdd5b8", size = 38624074, upload-time = "2026-03-12T02:15:48.036Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/34/4c3c6890ce6095b2ab2ba2f5f15c9a7ba17208d47f8cacb572885a2dc0eb/mlx_metal-0.31.1-py3-none-macosx_15_0_arm64.whl", hash = "sha256:6c56bd8cd27743e635f5a90a22535af7c31bd22b4b126d46b6da2da52d72e413", size = 38618950, upload-time = "2026-03-12T02:15:51.908Z" },
+    { url = "https://files.pythonhosted.org/packages/51/bc/987cb99e3aafb296aa11ce5133838a10eae8447edd53168d0804d4fb3a14/mlx_metal-0.31.1-py3-none-macosx_26_0_arm64.whl", hash = "sha256:e7324b7c56b519ae67c025d3ced07e5d35bc3a9f19d4c45fe4927f385148c59e", size = 49256543, upload-time = "2026-03-12T02:15:54.851Z" },
+]
+
+[[package]]
 name = "mpmath"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -987,6 +1014,7 @@ dependencies = [
     { name = "ipykernel" },
     { name = "kernels" },
     { name = "matplotlib" },
+    { name = "mlx", marker = "sys_platform == 'darwin' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
     { name = "psutil" },
     { name = "python-dotenv" },
     { name = "regex" },
@@ -997,10 +1025,10 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
     { name = "tomli-w" },
-    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-nanochat-gpu'" },
     { name = "transformers" },
     { name = "uvicorn" },
     { name = "wandb" },
@@ -1009,14 +1037,11 @@ dependencies = [
 
 [package.optional-dependencies]
 cpu = [
-    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "torch", version = "2.9.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 gpu = [
     { name = "torch", version = "2.9.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" } },
-]
-mps = [
-    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" } },
 ]
 
 [package.dev-dependencies]
@@ -1035,6 +1060,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "kernels", specifier = ">=0.11.7" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.26.0" },
     { name = "psutil", specifier = ">=7.1.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "regex", specifier = ">=2025.9.1" },
@@ -1048,13 +1074,12 @@ requires-dist = [
     { name = "torch", specifier = "==2.9.1" },
     { name = "torch", marker = "extra == 'cpu'", specifier = "==2.9.1", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "nanochat", extra = "cpu" } },
     { name = "torch", marker = "extra == 'gpu'", specifier = "==2.9.1", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "nanochat", extra = "gpu" } },
-    { name = "torch", marker = "extra == 'mps'", specifier = "==2.9.1" },
     { name = "transformers", specifier = ">=4.57.3" },
     { name = "uvicorn", specifier = ">=0.36.0" },
     { name = "wandb", specifier = ">=0.21.3" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
-provides-extras = ["cpu", "gpu", "mps"]
+provides-extras = ["cpu", "gpu"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1142,7 +1167,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "extra == 'extra-8-nanochat-gpu' or extra == 'extra-8-nanochat-mps' or extra != 'extra-8-nanochat-cpu'" },
+    { name = "nvidia-cublas-cu12", marker = "extra == 'extra-8-nanochat-gpu'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/41/e79269ce215c857c935fd86bcfe91a451a584dfc27f1e068f568b9ad1ab7/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:c9132cc3f8958447b4910a1720036d9eff5928cc3179b0a51fb6d167c6cc87d8", size = 705026878, upload-time = "2025-06-06T21:52:51.348Z" },
@@ -1155,7 +1180,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-nanochat-gpu' or extra == 'extra-8-nanochat-mps' or extra != 'extra-8-nanochat-cpu'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-nanochat-gpu'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/bc/7771846d3a0272026c416fbb7e5f4c1f146d6d80704534d0b187dd6f4800/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:848ef7224d6305cdb2a4df928759dca7b1201874787083b6e7550dd6765ce69a", size = 193109211, upload-time = "2025-03-07T01:44:56.873Z" },
@@ -1187,9 +1212,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "extra == 'extra-8-nanochat-gpu' or extra == 'extra-8-nanochat-mps' or extra != 'extra-8-nanochat-cpu'" },
-    { name = "nvidia-cusparse-cu12", marker = "extra == 'extra-8-nanochat-gpu' or extra == 'extra-8-nanochat-mps' or extra != 'extra-8-nanochat-cpu'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-nanochat-gpu' or extra == 'extra-8-nanochat-mps' or extra != 'extra-8-nanochat-cpu'" },
+    { name = "nvidia-cublas-cu12", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "nvidia-cusparse-cu12", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-nanochat-gpu'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/32/f7cd6ce8a7690544d084ea21c26e910a97e077c9b7f07bf5de623ee19981/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:db9ed69dbef9715071232caa9b69c52ac7de3a95773c2db65bdba85916e4e5c0", size = 267229841, upload-time = "2025-03-07T01:46:54.356Z" },
@@ -1202,7 +1227,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-nanochat-gpu' or extra == 'extra-8-nanochat-mps' or extra != 'extra-8-nanochat-cpu'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-nanochat-gpu'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/f7/cd777c4109681367721b00a106f491e0d0d15cfa1fd59672ce580ce42a97/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9b6c161cb130be1a07a27ea6923df8141f3c295852f4b260c65f18f3e0a091dc", size = 288117129, upload-time = "2025-03-07T01:47:40.407Z" },
@@ -1602,7 +1627,7 @@ name = "pytest"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -1679,7 +1704,7 @@ name = "pyzmq"
 version = "27.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "implementation_name == 'pypy' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "cffi", marker = "implementation_name == 'pypy' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/04/0b/3c9baedbdf613ecaa7aa07027780b8867f57b6293b6ee50de316c9f3222b/pyzmq-27.1.0.tar.gz", hash = "sha256:ac0765e3d44455adb6ddbf4417dcce460fc40a05978c08efdf2948072f6db540", size = 281750, upload-time = "2025-09-08T23:10:18.157Z" }
 wheels = [
@@ -2042,13 +2067,13 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "setuptools", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "setuptools", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cpu/torch-2.9.1-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:8924d10d36eac8fe0652a060a03fc2ae52980841850b9a1a2ddb0f27a4f181cd" },
@@ -2066,29 +2091,13 @@ resolution-markers = [
     "sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "filelock", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "fsspec", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "jinja2", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "networkx", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "nvidia-cublas-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cuda-cupti-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cuda-runtime-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cudnn-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cufft-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cufile-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-curand-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cusolver-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cusparse-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cusparselt-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nccl-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nvshmem-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nvtx-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "setuptools", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "sympy", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
-    { name = "triton", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "typing-extensions", marker = "extra == 'extra-8-nanochat-mps' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "filelock", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "fsspec", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "jinja2", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "networkx", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "setuptools", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "sympy", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
+    { name = "typing-extensions", marker = "(extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra != 'extra-8-nanochat-cpu' and extra != 'extra-8-nanochat-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/60/8fc5e828d050bddfab469b3fe78e5ab9a7e53dda9c3bdc6a43d17ce99e63/torch-2.9.1-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:c29455d2b910b98738131990394da3e50eea8291dfeb4b12de71ecf1fdeb21cb", size = 104135743, upload-time = "2025-11-12T15:21:34.936Z" },
@@ -2118,13 +2127,13 @@ resolution-markers = [
     "sys_platform != 'darwin' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "setuptools", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "setuptools", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'extra-8-nanochat-cpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cpu/torch-2.9.1%2Bcpu-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:3e532e553b37ee859205a9b2d1c7977fd6922f53bbb1b9bfdd5bdc00d1a60ed4" },
@@ -2151,29 +2160,29 @@ resolution-markers = [
     "sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "filelock", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "fsspec", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "jinja2", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "networkx", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cublas-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cuda-cupti-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cuda-runtime-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cudnn-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cufft-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cufile-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-curand-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cusolver-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cusparse-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-cusparselt-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nccl-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nvshmem-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "nvidia-nvtx-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "setuptools", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "sympy", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "triton", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
-    { name = "typing-extensions", marker = "extra == 'extra-8-nanochat-gpu' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "filelock", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "fsspec", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "jinja2", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "networkx", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "nvidia-cublas-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cuda-cupti-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cudnn-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cufft-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cufile-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-curand-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cusolver-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cusparse-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-cusparselt-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-nccl-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-nvshmem-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "nvidia-nvtx-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "setuptools", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "sympy", marker = "extra == 'extra-8-nanochat-gpu'" },
+    { name = "triton", marker = "(sys_platform == 'linux' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
+    { name = "typing-extensions", marker = "extra == 'extra-8-nanochat-gpu'" },
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cu128/torch-2.9.1%2Bcu128-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:0b80b7555dcd0a75b7b06016991f01281a0bb078cf28fa2d1dfb949fad2fbd07" },
@@ -2214,7 +2223,7 @@ name = "tqdm"
 version = "4.67.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu') or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-mps') or (extra == 'extra-8-nanochat-gpu' and extra == 'extra-8-nanochat-mps')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-nanochat-cpu' and extra == 'extra-8-nanochat-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737, upload-time = "2024-11-24T20:12:22.481Z" }
 wheels = [

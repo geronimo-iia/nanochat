@@ -26,6 +26,7 @@ dependencies = [
     "uvicorn>=0.36.0",
     "wandb>=0.21.3",
     "zstandard>=0.25.0",
+    "mlx>=0.26.0; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
@@ -80,16 +81,12 @@ cpu = [
 gpu = [
     "torch==2.9.1",
 ]
-mps = [
-    "torch==2.9.1",
-]
 
 [tool.uv]
 conflicts = [
     [
         { extra = "cpu" },
         { extra = "gpu" },
-        { extra = "mps" },
     ],
 ]
 

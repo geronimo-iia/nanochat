@@ -230,15 +230,24 @@ Shares only `GPTConfig` from `models/config.py`.
 
 ### Attention
 
-The key open question from the design doc: does `mx.fast.scaled_dot_product_attention`
-support sliding window?
+`mx.fast.scaled_dot_product_attention` supports GQA natively — keys and values should not
+be pre-tiled to match queries. Input layout is `[B, N, T, D]` (heads before sequence),
+which differs from FA3's `[B, T, N, D]` — queries, keys, and values need to be transposed.
 
-- **If yes**: use it directly with a `window_size` equivalent
-- **If no**: implement causal attention manually with a sliding window mask
+No native sliding window parameter exists. Instead, build a boolean causal mask with the
+window applied:
+
+```python
+def causal_window_mask(T: int, window: int) -> mx.array:
+    i = mx.arange(T)[:, None]
+    j = mx.arange(T)[None, :]
+    return (j <= i) & (i - j < window)
+```
+
+For full-context layers (`window_pattern = "L"`), pass `mask="causal"` directly.
+For sliding window layers (`window_pattern = "S"`), pass the precomputed boolean mask.
 
 FA3 and DDP are irrelevant for MLX — single-device only, `mx.compile` replaces `torch.compile`.
-GQA (grouped-query attention) must be handled manually if `mx.fast.scaled_dot_product_attention`
-doesn't support `n_kv_head != n_head` — keys/values would need to be repeated.
 
 ### Features to port
 
@@ -273,9 +282,11 @@ This validation lives in `tests/test_models/test_mlx_gpt.py` and is skipped when
 
 ### Open questions to resolve before coding
 
-- Does `mx.fast.scaled_dot_product_attention` support sliding window and GQA?
-- Does `mx.nn.value_and_grad` handle the grad accumulation pattern, or do we accumulate manually?
-- MLX arrays are lazy — when does `mx.eval()` need to be called in the training loop?
+- ✅ `mx.fast.scaled_dot_product_attention` supports GQA natively
+- ✅ Sliding window implemented via boolean causal mask — no native parameter needed
+- ✅ `nn.value_and_grad(model, fn)` is the correct API for training
+- Does `mx.nn.value_and_grad` handle grad accumulation, or do we accumulate manually?
+- MLX arrays are lazy — `mx.eval()` must be called explicitly; determine the right cadence in the training loop
 
 ---
 
@@ -288,6 +299,5 @@ _To be written after MLX GPT forward pass is validated._
 ## Open questions
 
 - Should MLXTrainer support the compression metrics tracker, or defer that?
-- Does `mx.fast.scaled_dot_product_attention` support sliding window and GQA?
-- Does `mx.nn.value_and_grad` handle the grad accumulation pattern, or do we accumulate manually?
-- MLX arrays are lazy — when does `mx.eval()` need to be called in the training loop?
+- Does `mx.nn.value_and_grad` handle grad accumulation, or do we accumulate manually?
+- MLX arrays are lazy — `mx.eval()` must be called explicitly; determine the right cadence in the training loop
