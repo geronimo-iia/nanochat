@@ -156,39 +156,4 @@ src/nanochat/
 6. ✅ **Backend-agnostic `loop.py`** — loop calls only protocol methods
 7. ✅ **Checkpoint interop** — numpy or safetensors cross-backend handoff
 8. ✅ **CLI integration** — see [cli-backend-integration.md](cli-backend-integration.md)
-9. ✅ **Documentation** — update and create reference docs reflecting the completed architecture
-
----
-
-## Step 9 — Documentation plan
-
-### Updates to existing docs
-
-| File | Changes |
-|---|---|
-| `code-structure.md` | Add `convert.py`, `safetensors_manager.py` to checkpoint table; add `compression_math.py`, `base/trainer.py` to training table; update CLI→training flow to show `BaseTrainer`/`TorchTrainer`; update dependency rules |
-| `m3-max-guide.md` | Add MLX section: `--backend=mlx` flag, MLX vs MPS comparison, when to use each, batch size recommendations |
-| `mlx-gpt-design.md` | Convert from planning doc to reference doc: remove "Step 3 of...", remove Deferred section, remove Open questions resolved, status `active` |
-| `mlx-muon-design.md` | Same treatment as `mlx-gpt-design.md`: remove planning framing, remove Deferred section, status `active` |
-
-### New docs
-
-**`checkpoint-interop.md`** — checkpoint system reference
-- `CheckpointManager` protocol and `Checkpoint` / `CheckpointMetadata` types
-- `TorchCheckpointManager` vs `SafetensorsCheckpointManager` — when to use each
-- `convert.py` conversion boundary — `to_numpy`, `from_numpy_torch`, `from_numpy_mlx`
-- Mermaid diagram: save flow (trainer → manager → disk) and load flow (disk → manager → trainer)
-- Optimizer state note: currently `torch.save`/`torch.load`, future split into safetensors + JSON
-
-**`trainer-protocol.md`** — `BaseTrainer` protocol reference
-- `StepResult` dataclass
-- All 7 protocol methods with signatures and contracts
-- `TorchTrainer` internals: accumulation loop, scaler path, `_last_x`/`_last_y` snapshot
-- Mermaid diagram: `loop.py` → `BaseTrainer` call sequence per training step
-- How to implement a new backend (checklist)
-
-**`mlx-backend.md`** — MLX stack overview tying the pieces together
-- MLX GPT forward pass parity (references `mlx-gpt-design.md`)
-- MLX Muon optimizer parity (references `mlx-muon-design.md`)
-- What `MLXTrainer` will wire up: `forward_backward`, `step`, `eval_context`
-- Mermaid diagram: full MLX stack from `loop.py` call to `mx.eval()`
+9. ✅ **Documentation** — see [mlx-backend.md](mlx-backend.md), [trainer-protocol.md](trainer-protocol.md), [checkpoint-interop.md](checkpoint-interop.md)
