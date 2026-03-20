@@ -26,6 +26,10 @@ def has_ve(layer_idx: int, n_layer: int) -> bool:
     return layer_idx % 2 == (n_layer - 1) % 2
 
 
+def _ve_key(layer_idx: int) -> str:
+    return f"ve_{layer_idx}"
+
+
 def apply_rotary_emb(x: mx.array, cos: mx.array, sin: mx.array) -> mx.array:
     # x: [B, N, T, D]  cos/sin: [1, 1, T, D//2]
     d = x.shape[-1] // 2
@@ -169,7 +173,7 @@ class GPT(nn.Module):
         head_dim = config.n_embd // config.n_head
         kv_dim = config.n_kv_head * head_dim
         self.value_embeds = {
-            str(i): nn.Embedding(padded_vocab, kv_dim)
+            _ve_key(i): nn.Embedding(padded_vocab, kv_dim)
             for i in range(config.n_layer)
             if has_ve(i, config.n_layer)
         }
@@ -181,6 +185,9 @@ class GPT(nn.Module):
         # Per-layer window sizes and masks
         self.window_sizes: List[Tuple[int, int]] = self._compute_window_sizes(config)
         self._masks = self._build_masks(config)
+
+        # Freeze non-trainable buffers
+        self.freeze(keys=["cos", "sin"])
 
     def _precompute_rotary(self, seq_len: int, head_dim: int, base: int = 100000) -> Tuple[mx.array, mx.array]:
         channel_range = mx.arange(0, head_dim, 2, dtype=mx.float32)
@@ -235,7 +242,7 @@ class GPT(nn.Module):
 
         for i, block in enumerate(self.blocks):
             x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
-            ve = self.value_embeds[str(i)](idx) if str(i) in self.value_embeds else None
+            ve = self.value_embeds[_ve_key(i)](idx) if has_ve(i, self.config.n_layer) else None
             mask = self._masks[i] if T == self.config.sequence_len else (
                 "causal" if self.window_sizes[i][0] == self.config.sequence_len
                 else causal_window_mask(T, self.window_sizes[i][0])

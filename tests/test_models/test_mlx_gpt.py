@@ -58,8 +58,9 @@ def _copy_weights_torch_to_mlx(torch_model: TorchGPT, mlx_model: MLXGPT) -> None
     # Value embeddings
     for i in range(n_layer):
         key = str(i)
-        if key in mlx_model.value_embeds:
-            mlx_model.value_embeds[key].weight = t2m(torch_model.value_embeds[key].weight)
+        ve_key = f"ve_{i}"
+        if ve_key in mlx_model.value_embeds:
+            mlx_model.value_embeds[ve_key].weight = t2m(torch_model.value_embeds[key].weight)
 
     # Blocks
     for i, (torch_block, mlx_block) in enumerate(zip(torch_model.transformer.h, mlx_model.blocks)):
