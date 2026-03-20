@@ -156,7 +156,7 @@ src/nanochat/
 6. ✅ **Backend-agnostic `loop.py`** — loop calls only protocol methods
 7. ✅ **Checkpoint interop** — numpy or safetensors cross-backend handoff
 8. ✅ **CLI integration** — see [cli-backend-integration.md](cli-backend-integration.md)
-9. **Documentation** — update and create reference docs reflecting the completed architecture
+9. ✅ **Documentation** — update and create reference docs reflecting the completed architecture
 
 ---
 

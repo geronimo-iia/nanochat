@@ -81,9 +81,9 @@ See an example [here](https://github.com/karpathy/nanochat/pull/498#issuecomment
 
 The important thing to note is that nanochat is written and configured around one single dial of complexity - the depth of the transformer. This single integer automatically determines all other hyperparameters (the width of the transformer, number of heads, learning rate adjustments, training horizons, weight decays, ...) so that the trained model comes out compute optimal. The idea is that the user doesn't have to think about or set any of this, they are simply asking for a smaller or bigger model using `--depth`, and everything "just works". By sweeping out the depth, you achieve the nanochat miniseries of compute optimal models at various sizes. GPT-2 capability model (which is of most interest at the moment) happens to be somewhere around d24-d26 range with the current code. But any candidate changes to the repo have to be principled enough that they work for all settings of depth.
 
-## Running on CPU / MPS
+## Running on CPU / Apple Silicon
 
-The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of running on CPU or Apple Silicon. It dramatically shrinks the LLM that is being trained to make things fit into a reasonable time interval of a few ten minutes of training. You will not get strong results in this way.
+The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of running on CPU or Apple Silicon. It dramatically shrinks the LLM that is being trained to make things fit into a reasonable time interval of a few ten minutes of training. You will not get strong results in this way. On Apple Silicon, MLX is autodetected and used by default — see [docs/m3-max-guide.md](docs/m3-max-guide.md) for batch size recommendations and backend selection.
 
 ## Precision / dtype
 
@@ -114,7 +114,12 @@ Note: `float16` training automatically enables a `GradScaler` in `base_train.py`
 - [docs/configuration.md](docs/configuration.md) — config fields, TOML files, CLI overrides
 - [docs/data-layout.md](docs/data-layout.md) — where nanochat stores data, tokenizers, and checkpoints
 - [docs/code-structure.md](docs/code-structure.md) — package map and key cross-package flows
-- [docs/m3-max-guide.md](docs/m3-max-guide.md) — Apple Silicon (MPS) training guide
+- [docs/m3-max-guide.md](docs/m3-max-guide.md) — Apple Silicon guide: MLX (recommended) and MPS backends
+- [docs/mlx-backend.md](docs/mlx-backend.md) — MLX training stack overview with diagrams
+- [docs/trainer-protocol.md](docs/trainer-protocol.md) — BaseTrainer protocol reference, loop.py call sequence, implementing a new backend
+- [docs/checkpoint-interop.md](docs/checkpoint-interop.md) — CheckpointManager protocol, safetensors cross-backend interop, conversion boundary
+- [docs/mlx-gpt-design.md](docs/mlx-gpt-design.md) — MLX GPT architecture reference
+- [docs/mlx-muon-design.md](docs/mlx-muon-design.md) — MLX Muon optimizer reference
 - [docs/roadmap.md](docs/roadmap.md) — development roadmap and completed phases
 - [CONTRIBUTING.md](CONTRIBUTING.md) — setup, testing, code quality, and commit conventions
 
