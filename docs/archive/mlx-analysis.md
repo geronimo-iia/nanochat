@@ -1,11 +1,11 @@
 ---
 title: "MLX Backend Analysis"
-summary: "Fresh analysis of the MLX backend after Phase 1+2 integration work: three findings at the application level with proposals."
+summary: "Fresh analysis of the MLX backend after Phase 1+2 integration work: three findings at the application level with proposals. All findings resolved."
 read_when:
-  - Reviewing MLX training correctness or performance before deeper development
-  - Investigating dtype control or memory behaviour on the MLX path
-  - Working on MLXTrainer grad accumulation or loader lifecycle
-status: draft
+  - Understanding why MLXTrainer owns torch→mlx conversion
+  - Understanding the orig_model/model split rationale
+  - Historical reference for Phase 3 MLX work
+status: archived
 last_updated: "2025-07-25"
 ---
 
@@ -14,6 +14,8 @@ last_updated: "2025-07-25"
 Post Phase 1+2 review. The structural foundation (`common/mlx.py`, `_BackendSetup`,
 `mlx_compute_init`, `clear_device_cache`, `get_device_sync`) is solid. Three application-level
 findings remain.
+
+**All findings resolved. Archived after Phase 3 implementation.**
 
 ---
 
@@ -60,6 +62,13 @@ class MLXTrainer:
 `_setup_mlx` passes the raw torch loader. The conversion is an implementation detail
 of the trainer, not a concern of the setup path.
 
+### Resolution
+
+Implemented in Task 1. `mlx_loader` generator removed from `_setup_mlx`. `MLXTrainer`
+now owns `_torch_loader` and `_next_batch`. Loader state preservation verified by
+`test_loader_state_preserved_across_forward_backward` — confirms init primes once and
+each `forward_backward` advances the loader by exactly `grad_accum_steps` calls.
+
 ---
 
 ## Finding 2 — `get_mlx_compute_dtype` is defined but never used
@@ -89,6 +98,12 @@ model = model.astype(compute_dtype)
 ```
 
 Simple, one line cast, no architectural change. Full parameter copy at startup only.
+
+### Resolution
+
+Implemented in Task 3. `get_mlx_compute_dtype()` called in `_setup_mlx` after model
+construction, logged, and model cast with `model.astype(compute_dtype)` before
+`build_param_groups` so the optimizer sees the cast parameters.
 
 ---
 
@@ -130,6 +145,11 @@ class MLXTrainer:
         ...
 ```
 
+### Resolution
+
+Implemented in Task 1. Constructor takes `orig_model, model`. `_loss_and_grad`,
+`eval_context`, `model_state_dict`, and `load_state_dicts` all use `self._orig_model`.
+
 ---
 
 ## Finding 4 — grad accumulation tree allocation (noted, won't fix)
@@ -153,10 +173,10 @@ Summing on the fly (current approach) is already correct and clear. Not worth ch
 
 | Finding | Risk | Effort | Decision |
 |---|---|---|---|
-| `mlx_loader` exhaustible generator | Latent correctness bug | Small | Fix — move conversion into `MLXTrainer`, pass raw torch loader |
-| `get_mlx_compute_dtype` unused | Missing visibility + silent env var ignore | Small | Fix — Option A: log + `model.astype(compute_dtype)` |
-| `_loss_and_grad` stale capture | Latent, not active | Small | Fix — `orig_model`/`model` split as in `TorchTrainer` |
-| Grad accum tree allocation | Python overhead only, bounded | — | Won't fix — cost is negligible at typical accum steps |
+| `mlx_loader` exhaustible generator | Latent correctness bug | Small | Fixed — Task 1 |
+| `get_mlx_compute_dtype` unused | Missing visibility + silent env var ignore | Small | Fixed — Task 3 |
+| `_loss_and_grad` stale capture | Latent, not active | Small | Fixed — Task 1 |
+| Grad accum tree allocation | Python overhead only, bounded | — | Won't fix |
 
 ---
 
@@ -211,8 +231,8 @@ File: `src/nanochat/training/base/setup.py`
 
 **Verification**
 
-- `pytest tests/test_training/test_mlx_trainer.py` — constructor signature change will
-  require updating the test fixtures.
-- Full `pytest` suite — 322 passed, 10 skipped baseline.
-- Confirm `_next_batch` is called correctly by checking loader state is preserved across
-  `forward_backward` calls in the test.
+- `pytest tests/test_training/test_mlx_trainer.py` — 13 passed (12 original + 1 new).
+- Full `pytest` suite — 323 passed, 10 skipped.
+- `test_loader_state_preserved_across_forward_backward` confirms `_next_batch` advances
+  the loader monotonically: 1 call at init, then `grad_accum_steps` calls per
+  `forward_backward`.

@@ -341,11 +341,10 @@ def _setup_mlx(
     resume_ckpt: object,
 ) -> _BackendSetup:
     """Build MLXTrainer."""
-    import mlx.core as mx
-
     from nanochat.models.mlx_gpt import GPT as MLXGPT
     from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
     from nanochat.training.mlx_trainer import MLXTrainer
+    from nanochat.common import get_mlx_compute_dtype
 
     mlx_compute_init()
 
@@ -355,6 +354,10 @@ def _setup_mlx(
 
     gpt_config = GPTConfig(**model_config_kwargs)
     model = MLXGPT(gpt_config)
+
+    compute_dtype = get_mlx_compute_dtype()
+    print0(f"COMPUTE_DTYPE: {compute_dtype} (MLX)")
+    model = model.astype(compute_dtype)
 
     optimizer = MuonAdamW(build_param_groups(
         model,
@@ -382,17 +385,13 @@ def _setup_mlx(
         resume_state_dict=dataloader_resume_state_dict,
     )
 
-    # Wrap loader to convert torch tensors → mx.arrays
-    def mlx_loader():
-        for x, y, state in train_loader:
-            yield mx.array(x.numpy()), mx.array(y.numpy()), state
-
-    trainer: BaseTrainer = MLXTrainer(model, optimizer, grad_accum_steps, mlx_loader())
+    trainer: BaseTrainer = MLXTrainer(model, model, optimizer, grad_accum_steps, train_loader)
 
     if resuming:
         assert resume_ckpt is not None
         trainer.load_state_dicts(resume_ckpt.model_state, resume_ckpt.optimizer_state)
         del resume_ckpt.model_state, resume_ckpt.optimizer_state
+        trainer.reprime()
 
     synchronize, get_max_memory = get_device_sync("mlx")
 

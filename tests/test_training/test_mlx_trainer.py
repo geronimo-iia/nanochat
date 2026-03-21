@@ -7,6 +7,7 @@ pytest.importorskip("mlx", reason="MLX not installed")
 import mlx.core as mx
 import mlx.nn as mlx_nn
 import numpy as np
+import torch
 
 from nanochat.models.config import GPTConfig
 from nanochat.models.mlx_gpt import GPT
@@ -24,9 +25,9 @@ CONFIG = GPTConfig(
 )
 
 
-def _batch(rng: np.random.Generator) -> tuple[mx.array, mx.array, dict]:
-    x = mx.array(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32))
-    y = mx.array(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32))
+def _batch(rng: np.random.Generator) -> tuple[torch.Tensor, torch.Tensor, dict]:
+    x = torch.from_numpy(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32))
+    y = torch.from_numpy(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32))
     return x, y, {"epoch": 0, "pq_idx": 0, "rg_idx": 0}
 
 
@@ -39,7 +40,7 @@ def _trainer(grad_accum_steps: int = 1) -> MLXTrainer:
     rng = np.random.default_rng(0)
     model = GPT(CONFIG)
     optimizer = MuonAdamW(build_param_groups(model))
-    return MLXTrainer(model, optimizer, grad_accum_steps, _loader(rng))
+    return MLXTrainer(model, model, optimizer, grad_accum_steps, _loader(rng))
 
 
 def test_step_result_fields():
@@ -136,6 +137,31 @@ def test_eval_context_restores_train_mode():
     # MLX nn.Module doesn't expose training flag directly — verify no exception
     # and that forward still works after context exit
     trainer.forward_backward()
+
+
+def test_loader_state_preserved_across_forward_backward():
+    """_next_batch must advance the loader monotonically across forward_backward calls."""
+    call_count = 0
+
+    def counting_loader():
+        nonlocal call_count
+        rng = np.random.default_rng(0)
+        while True:
+            call_count += 1
+            yield _batch(rng)
+
+    model = GPT(CONFIG)
+    optimizer = MuonAdamW(build_param_groups(model))
+    grad_accum_steps = 2
+    trainer = MLXTrainer(model, model, optimizer, grad_accum_steps, counting_loader())
+
+    assert call_count == 1  # primed once at init
+
+    trainer.forward_backward()
+    assert call_count == 1 + grad_accum_steps  # each microbatch pulls one batch
+
+    trainer.forward_backward()
+    assert call_count == 1 + 2 * grad_accum_steps  # second step continues from where we left off
 
 
 def test_eval_context_restores_on_exception():

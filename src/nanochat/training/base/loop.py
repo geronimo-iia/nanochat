@@ -150,10 +150,11 @@ def train_loop(s: BaseTrainingSetup, checkpoint_manager: CheckpointManager) -> N
             eta_str = f" | eta: {eta_seconds / 60:.1f}m"
         assert state.dataloader_state_dict is not None
         epoch = f"{state.dataloader_state_dict['epoch']} pq: {state.dataloader_state_dict['pq_idx']} rg: {state.dataloader_state_dict['rg_idx']}"
+        mfu_str = f" | bf16_mfu: {mfu:.2f}" if s.gpu_peak_flops != float("inf") else ""
         print0(
             f"step {state.step:05d}/{s.num_iterations:05d} ({100 * state.step / s.num_iterations:.2f}%) | "
             f"loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | dt: {dt * 1000:.2f}ms | "
-            f"tok/sec: {tok_per_sec:,} | bf16_mfu: {mfu:.2f} | epoch: {epoch} | "
+            f"tok/sec: {tok_per_sec:,}{mfu_str} | epoch: {epoch} | "
             f"total time: {state.total_training_time / 60:.2f}m{eta_str}"
         )
 
@@ -175,19 +176,18 @@ def train_loop(s: BaseTrainingSetup, checkpoint_manager: CheckpointManager) -> N
             if s.master_process:
                 s.wandb_run.log({f"compression/{k}": v for k, v in compression_metrics.items()}, step=state.step)
 
-        s.wandb_run.log(
-            {
-                "total_training_flops": flops_so_far,
-                "total_training_time": state.total_training_time,
-                "train/loss": debiased_smooth_loss,
-                "train/lrm": lrm,
-                "train/dt": dt,
-                "train/tok_per_sec": tok_per_sec,
-                "train/mfu": mfu,
-                "train/epoch": epoch,
-            },
-            step=state.step,
-        )
+        log_payload: dict[str, object] = {
+            "total_training_flops": flops_so_far,
+            "total_training_time": state.total_training_time,
+            "train/loss": debiased_smooth_loss,
+            "train/lrm": lrm,
+            "train/dt": dt,
+            "train/tok_per_sec": tok_per_sec,
+            "train/epoch": epoch,
+        }
+        if s.gpu_peak_flops != float("inf"):
+            log_payload["train/mfu"] = mfu
+        s.wandb_run.log(log_payload, step=state.step)
 
         first_step_of_run = (state.step == 0) or (s.resuming and state.step == s.config.checkpoint.resume_from_step)
         state.step += 1
