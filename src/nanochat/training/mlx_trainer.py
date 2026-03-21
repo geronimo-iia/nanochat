@@ -43,6 +43,8 @@ class MLXTrainer:
         self._y: mx.array
         self._loader_state: dict[str, object]
         self._x, self._y, self._loader_state = next(train_loader)
+        self._last_x = self._x
+        self._last_y = self._y
 
     def forward_backward(self) -> StepResult:
         # Snapshot batch at start of step for forward_logits

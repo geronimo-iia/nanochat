@@ -69,3 +69,37 @@ Sequencing depends on the Phase 1.5 outcome.
 - **Safetensors optimizer state** — optimizer state is currently saved with `torch.save` even in `SafetensorsCheckpointManager`. A future improvement would split into tensor buffers (`.safetensors`) and scalar metadata (JSON) to remove the torch dependency entirely. See note in [checkpoint-interop.md](checkpoint-interop.md).
 
 - **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark. Tested on d6 (10 steps): no measurable throughput improvement. May help at larger depths where memory pressure is real.
+
+
+## MLX / MPS Performance Investigations
+
+Baseline measured on M3 Max, d6, 10 steps, **without** `torch.compile` (eager mode):
+
+| metric      | value          |
+| ----------- | -------------- |
+| dt per step | ~20–22s        |
+| tok/sec     | ~23,000–25,000 |
+
+Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile` active, which causes NaN gradients — those numbers are invalid.
+
+### MLX backend — device_type gap
+
+`_setup_mlx` returns `device_type = "mlx"`, not `"mps"`. Consequences:
+
+- `torch.mps.empty_cache()` is **not called** between steps — the Metal GPU is shared between MLX and PyTorch runtimes, so memory pressure may build up without it.
+- `synchronize` falls through to `lambda: None` in `get_device_sync` — however step timing is still accurate because `MLXTrainer.step()` ends with `mx.eval(model.parameters(), optimizer.state())` which blocks until GPU work completes.
+- `get_max_memory` returns `0` — no memory reporting on the MLX path.
+
+MLX default device is `Device(gpu, 0)` — it always runs on the Metal GPU, there is no device selection. `"cuda"` / `"mps"` are torch backend concepts and don't apply. The correct fix is an explicit `"mlx"` branch in the loop (and `get_device_sync`) rather than reusing `"mps"`.
+
+MLX equivalents identified:
+
+| torch (MPS path)                        | MLX equivalent                   |
+| --------------------------------------- | -------------------------------- |
+| `torch.mps.empty_cache()`               | `mx.metal.clear_cache()`         |
+| `torch.mps.synchronize`                 | `mx.eval` (already in `step()`)  |
+| `torch.mps.current_allocated_memory()`  | `mx.metal.get_active_memory()`   |
+
+Required changes: `hardware.py` `get_device_sync` gains `"mlx"` branch, `loop.py` cache-clear gains `"mlx"` branch, `_setup_mlx` returns `get_max_memory = mx.metal.get_active_memory`.
+
+Full design and implementation plan: [mlx-device-type-refactor.md](mlx-device-type-refactor.md).

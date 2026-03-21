@@ -5,6 +5,7 @@ import torch
 
 from nanochat.checkpoint import CheckpointManager
 from nanochat.common import print0
+from nanochat.common.hardware import clear_device_cache
 from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine
 from nanochat.evaluation.loss_eval import evaluate_bpb
@@ -111,8 +112,7 @@ def train_loop(s: BaseTrainingSetup, checkpoint_manager: CheckpointManager) -> N
         if last_step:
             break
 
-        if s.device_type == "mps":
-            torch.mps.empty_cache()
+        clear_device_cache(s.device_type)
 
         # Compression logits (before forward_backward so we use the current batch)
         logits_np = None

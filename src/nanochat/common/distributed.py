@@ -54,8 +54,8 @@ def autodetect_backend() -> str:
         return "torch"
 
 
-def compute_init(device_type: str = "cuda") -> Tuple[bool, int, int, int, torch.device]:
-    """Basic initialization that we keep doing over and over, so make common."""
+def torch_compute_init(device_type: str = "cuda") -> Tuple[bool, int, int, int, torch.device]:
+    """Torch-only compute init: seed, DDP, device. Not called on the MLX path."""
     setup_default_logging()
 
     assert device_type in ["cuda", "mps", "cpu"], "Invalid device type atm"
@@ -90,7 +90,23 @@ def compute_init(device_type: str = "cuda") -> Tuple[bool, int, int, int, torch.
     return is_ddp_requested, ddp_rank, ddp_local_rank, ddp_world_size, device
 
 
-def compute_cleanup() -> None:
-    """Companion function to compute_init, to clean things up before script exit."""
+# Backward-compatible alias — remove after all call sites are updated.
+compute_init = torch_compute_init
+
+
+def torch_compute_cleanup() -> None:
+    """Torch-only cleanup: destroy DDP process group. Not called on the MLX path."""
     if is_ddp_initialized():
         dist.destroy_process_group()
+
+
+# Backward-compatible alias — remove after all call sites are updated.
+compute_cleanup = torch_compute_cleanup
+
+
+def mlx_compute_init() -> None:
+    """Seed and device init for the MLX path. No DDP, no process group."""
+    import mlx.core as mx
+    setup_default_logging()
+    mx.random.seed(42)
+    mx.set_default_device(mx.gpu)

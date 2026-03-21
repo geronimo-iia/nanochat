@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
@@ -10,14 +10,16 @@ from nanochat.common import (
     WandbProtocol,
     autodetect_backend,
     autodetect_device_type,
-    compute_init,
     get_compute_dtype,
     get_compute_dtype_reason,
     get_device_sync,
+    get_mlx_device_info,
     get_peak_flops,
     init_wandb,
+    mlx_compute_init,
     print0,
     print_banner,
+    torch_compute_init,
 )
 from nanochat.config import Config
 from nanochat.models.flash_attention import HAS_FA3, _use_fa3
@@ -191,6 +193,18 @@ class BaseTrainingSetup:
 # Backend-specific trainer construction
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class _BackendSetup:
+    trainer: BaseTrainer
+    device_type: str
+    ddp_rank: int
+    ddp_world_size: int
+    device: torch.device  # torch device for the dataloader, not the compute device
+    synchronize: Callable[[], None]
+    get_max_memory: Callable[[], int]
+    gpu_peak_flops: float
+
+
 def _setup_torch(
     config: Config,
     checkpoint_manager: CheckpointManager,
@@ -207,8 +221,8 @@ def _setup_torch(
     ddp_rank: int,
     ddp_world_size: int,
     device: torch.device,
-) -> tuple[BaseTrainer, str, int, int, torch.device, Callable, Callable, float]:
-    """Build TorchTrainer. Returns (trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops)."""
+) -> _BackendSetup:
+    """Build TorchTrainer."""
     synchronize, get_max_memory = get_device_sync(device_type)
 
     if device_type == "cuda":
@@ -302,7 +316,16 @@ def _setup_torch(
         device_type=device_type,
         train_loader=train_loader,
     )
-    return trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops
+    return _BackendSetup(
+        trainer=trainer,
+        device_type=device_type,
+        ddp_rank=ddp_rank,
+        ddp_world_size=ddp_world_size,
+        device=device,
+        synchronize=synchronize,
+        get_max_memory=get_max_memory,
+        gpu_peak_flops=gpu_peak_flops,
+    )
 
 
 def _setup_mlx(
@@ -316,14 +339,18 @@ def _setup_mlx(
     tokenizer: object,
     resuming: bool,
     resume_ckpt: object,
-) -> tuple[BaseTrainer, str, int, int, torch.device, Callable, Callable, float]:
-    """Build MLXTrainer. Returns same tuple shape as _setup_torch."""
+) -> _BackendSetup:
+    """Build MLXTrainer."""
     import mlx.core as mx
 
     from nanochat.models.mlx_gpt import GPT as MLXGPT
     from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
     from nanochat.training.mlx_trainer import MLXTrainer
 
+    mlx_compute_init()
+
+    info = get_mlx_device_info()
+    print0(f"MLX device: {info['device_name']} | RAM: {info['memory_size'] / 1024**3:.0f}GB | arch: {info['architecture']}")
     print0("✓ MLX backend — single device, mx.compile, unified memory")
 
     gpt_config = GPTConfig(**model_config_kwargs)
@@ -343,12 +370,15 @@ def _setup_mlx(
         assert resume_ckpt is not None
         dataloader_resume_state_dict = resume_ckpt.metadata.dataloader_state_dict
 
+    torch_device_type = autodetect_device_type()  # "mps" on Apple Silicon, "cpu" otherwise
+    torch_device = torch.device(torch_device_type)
+
     train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
         tokenizer,
         config.training.device_batch_size,
         config.training.max_seq_len,
         split="train",
-        device=torch.device("cpu"),
+        device=torch_device,
         resume_state_dict=dataloader_resume_state_dict,
     )
 
@@ -364,10 +394,18 @@ def _setup_mlx(
         trainer.load_state_dicts(resume_ckpt.model_state, resume_ckpt.optimizer_state)
         del resume_ckpt.model_state, resume_ckpt.optimizer_state
 
-    synchronize: Callable[[], None] = lambda: mx.eval([])
-    get_max_memory: Callable[[], int] = lambda: 0
+    synchronize, get_max_memory = get_device_sync("mlx")
 
-    return trainer, "mlx", 0, 1, torch.device("cpu"), synchronize, get_max_memory, float("inf")
+    return _BackendSetup(
+        trainer=trainer,
+        device_type="mlx",
+        ddp_rank=0,
+        ddp_world_size=1,
+        device=torch_device,
+        synchronize=synchronize,
+        get_max_memory=get_max_memory,
+        gpu_peak_flops=float("inf"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -470,7 +508,7 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         _torch_device: torch.device = torch.device("cpu")
     else:
         _torch_device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
-        _, _torch_ddp_rank, _, _torch_ddp_world_size, _torch_device = compute_init(_torch_device_type)
+        _, _torch_ddp_rank, _, _torch_ddp_world_size, _torch_device = torch_compute_init(_torch_device_type)
         ddp_world_size_for_accum = _torch_ddp_world_size
 
     world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size_for_accum
@@ -494,7 +532,7 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
         )
 
     if backend == "mlx":
-        trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops = _setup_mlx(
+        b = _setup_mlx(
             config=config,
             checkpoint_manager=checkpoint_manager,
             model_config_kwargs=model_config_kwargs,
@@ -506,10 +544,10 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
             resuming=resuming,
             resume_ckpt=resume_ckpt,
         )
-        token_bytes = get_token_bytes(device=torch.device("cpu"))
+        token_bytes = get_token_bytes(device="cpu")
         master_process = True
     else:
-        trainer, device_type, ddp_rank, ddp_world_size, device, synchronize, get_max_memory, gpu_peak_flops = _setup_torch(
+        b = _setup_torch(
             config=config,
             checkpoint_manager=checkpoint_manager,
             meta_model=meta_model,
@@ -526,10 +564,19 @@ def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTraining
             ddp_world_size=_torch_ddp_world_size,
             device=_torch_device,
         )
-        token_bytes = get_token_bytes(device=device)
-        master_process = ddp_rank == 0
+        token_bytes = get_token_bytes(device=b.device)
+        master_process = b.ddp_rank == 0
         # Re-init wandb with correct master_process now that ddp_rank is known
         wandb_run = init_wandb(user_config=user_config, master_process=master_process)
+
+    trainer = b.trainer
+    device_type = b.device_type
+    ddp_rank = b.ddp_rank
+    ddp_world_size = b.ddp_world_size
+    device = b.device
+    synchronize = b.synchronize
+    get_max_memory = b.get_max_memory
+    gpu_peak_flops = b.gpu_peak_flops
 
     print0(
         f"Tokens / micro-batch / rank: {config.training.device_batch_size} x {config.training.max_seq_len} = {tokens_per_fwdbwd:,}"

@@ -92,7 +92,7 @@ class ConfigLoader:
         for section in self._sections:
             cls = SECTION_CLS[section]
             valid = cls.__dataclass_fields__
-            merged = {**toml_data.get(section, {}), **{k: v for k, v in cli.items() if k in valid}}
+            merged = {**{k: v for k, v in toml_data.get(section, {}).items() if k in valid}, **{k: v for k, v in cli.items() if k in valid}}
             setattr(cfg, section, cls(**merged))
 
         if cfg.common.base_dir is None:

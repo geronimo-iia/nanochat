@@ -12,7 +12,7 @@ def train_base(config: object) -> None:
 
     from nanochat import workspace
     from nanochat.checkpoint import make_checkpoint_manager
-    from nanochat.common import compute_cleanup
+    from nanochat.common import compute_cleanup, torch_compute_cleanup
     from nanochat.config import Config
     from nanochat.training.base.loop import train_loop
     from nanochat.training.base.setup import setup
@@ -28,4 +28,5 @@ def train_base(config: object) -> None:
     finally:
         if s is not None:
             s.wandb_run.finish()
-        compute_cleanup()
+        if s is None or s.device_type != "mlx":
+            torch_compute_cleanup()
