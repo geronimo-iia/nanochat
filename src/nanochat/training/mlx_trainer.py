@@ -110,7 +110,7 @@ class MLXTrainer:
     def forward_logits(self) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
         logits = mx.stop_gradient(self._orig_model(self._last_x))
         mx.eval(logits)
-        return np.array(logits), np.array(self._last_y)
+        return np.array(logits.astype(mx.float32)), np.array(self._last_y)
 
     def model_state_dict(self) -> dict[str, Any]:
         flat = dict(nn.utils.tree_flatten(self._orig_model.parameters()))

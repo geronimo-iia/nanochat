@@ -357,7 +357,7 @@ def _setup_mlx(
 
     compute_dtype = get_mlx_compute_dtype()
     print0(f"COMPUTE_DTYPE: {compute_dtype} (MLX)")
-    model = model.astype(compute_dtype)
+    model.set_dtype(compute_dtype)
 
     optimizer = MuonAdamW(build_param_groups(
         model,

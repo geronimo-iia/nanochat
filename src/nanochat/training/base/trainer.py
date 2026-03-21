@@ -68,6 +68,8 @@ class TorchTrainer:
         self._y: torch.Tensor
         self._loader_state: dict[str, object]
         self._x, self._y, self._loader_state = next(train_loader)
+        self._last_x = self._x
+        self._last_y = self._y
 
     def forward_backward(self) -> StepResult:
         # Snapshot the batch at the start of the step for forward_logits

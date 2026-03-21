@@ -27,7 +27,8 @@ class ConfigLoader:
         self._sections: set[str] = {"common"}
 
     def _add_section(self, name: str) -> ConfigLoader:
-        if self._sections - {"common"}:
+        non_common = self._sections - {"common", "checkpoint"}
+        if non_common and name != "checkpoint":
             raise RuntimeError("ConfigLoader only supports one section per instance")
         self._sections.add(name)
         return self

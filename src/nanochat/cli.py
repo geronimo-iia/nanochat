@@ -32,6 +32,7 @@ from nanochat.config import (
     SFTConfig,
     TokenizerConfig,
     TrainingConfig,
+    CheckpointConfig,
     config_init,
     config_show,
     init_config,
@@ -138,7 +139,8 @@ def _init_cli_train(sub):
 
     p = train_sub.add_parser("base", help="pretrain base model")
     TrainingConfig.update_parser(p)
-    p.set_defaults(func=lambda args: train_base(_load(ConfigLoader().add_training(), args)))
+    CheckpointConfig.update_parser(p)
+    p.set_defaults(func=lambda args: train_base(_load(ConfigLoader().add_training().add_checkpoint(), args)))
 
     p = train_sub.add_parser("sft", help="supervised fine-tuning")
     SFTConfig.update_parser(p)
