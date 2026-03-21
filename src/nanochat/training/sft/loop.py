@@ -166,22 +166,22 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
             state.total_training_time += dt
         print0(
             f"step {state.step:05d} ({pct_done:.2f}%) | loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | "
-            f"dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.2f} | "
-            f"epoch: {state.current_epoch} | total time: {state.total_training_time / 60:.2f}m"
+            f"dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,}"
+            + (f" | mfu: {mfu:.2f}" if s.gpu_peak_flops != float("inf") else "")
+            + f" | epoch: {state.current_epoch} | total time: {state.total_training_time / 60:.2f}m"
         )
-        s.wandb_run.log(
-            {
-                "total_training_flops": flops_so_far,
-                "total_training_time": state.total_training_time,
-                "train/loss": debiased_smooth_loss,
-                "train/lrm": lrm,
-                "train/dt": dt,
-                "train/tok_per_sec": tok_per_sec,
-                "train/mfu": mfu,
-                "train/epoch": state.current_epoch,
-            },
-            step=state.step,
-        )
+        log_payload: dict[str, object] = {
+            "total_training_flops": flops_so_far,
+            "total_training_time": state.total_training_time,
+            "train/loss": debiased_smooth_loss,
+            "train/lrm": lrm,
+            "train/dt": dt,
+            "train/tok_per_sec": tok_per_sec,
+            "train/epoch": state.current_epoch,
+        }
+        if s.gpu_peak_flops != float("inf"):
+            log_payload["train/mfu"] = mfu
+        s.wandb_run.log(log_payload, step=state.step)
 
         if state.step == 1:
             gc.collect()

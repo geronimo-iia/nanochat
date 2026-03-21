@@ -34,13 +34,11 @@ class MLXTrainer:
     def __init__(
         self,
         orig_model: GPT,
-        model: GPT,
         optimizer: MuonAdamW,
         grad_accum_steps: int,
         torch_loader: Any,
     ) -> None:
         self._orig_model = orig_model
-        self._model = model
         self._optimizer = optimizer
         self._grad_accum_steps = grad_accum_steps
         self._torch_loader = torch_loader

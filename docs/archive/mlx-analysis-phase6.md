@@ -1,7 +1,7 @@
 ---
 title: MLX Backend Analysis — Phase 6
 summary: Fresh eyes review of the MLX backend after Phase 5 implementation. Three findings.
-status: draft
+status: archived
 last_updated: 2025-07-10
 ---
 

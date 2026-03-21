@@ -40,7 +40,7 @@ def _trainer(grad_accum_steps: int = 1) -> MLXTrainer:
     rng = np.random.default_rng(0)
     model = GPT(CONFIG)
     optimizer = MuonAdamW(build_param_groups(model))
-    return MLXTrainer(model, model, optimizer, grad_accum_steps, _loader(rng))
+    return MLXTrainer(model, optimizer, grad_accum_steps, _loader(rng))
 
 
 def test_step_result_fields():
@@ -59,11 +59,11 @@ def test_forward_backward_loss_finite():
 def test_step_changes_params():
     trainer = _trainer()
     before = {k: np.array(v) for k, v in
-              mlx_nn.utils.tree_flatten(trainer._model.trainable_parameters())}
+              mlx_nn.utils.tree_flatten(trainer._orig_model.trainable_parameters())}
     trainer.forward_backward()
     trainer.step(lr_multiplier=1.0, momentum=0.95, weight_decay=0.0)
 
-    after = dict(mlx_nn.utils.tree_flatten(trainer._model.trainable_parameters()))
+    after = dict(mlx_nn.utils.tree_flatten(trainer._orig_model.trainable_parameters()))
     changed = sum(1 for k in before if not np.allclose(before[k], np.array(after[k])))
     assert changed > 0
 
@@ -153,7 +153,7 @@ def test_loader_state_preserved_across_forward_backward():
     model = GPT(CONFIG)
     optimizer = MuonAdamW(build_param_groups(model))
     grad_accum_steps = 2
-    trainer = MLXTrainer(model, model, optimizer, grad_accum_steps, counting_loader())
+    trainer = MLXTrainer(model, optimizer, grad_accum_steps, counting_loader())
 
     assert call_count == 1  # primed once at init
 

@@ -373,19 +373,16 @@ def _setup_mlx(
         assert resume_ckpt is not None
         dataloader_resume_state_dict = resume_ckpt.metadata.dataloader_state_dict
 
-    torch_device_type = autodetect_device_type()  # "mps" on Apple Silicon, "cpu" otherwise
-    torch_device = torch.device(torch_device_type)
-
     train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
         tokenizer,
         config.training.device_batch_size,
         config.training.max_seq_len,
         split="train",
-        device=torch_device,
+        device=torch.device("cpu"),
         resume_state_dict=dataloader_resume_state_dict,
     )
 
-    trainer: BaseTrainer = MLXTrainer(model, model, optimizer, grad_accum_steps, train_loader)
+    trainer: BaseTrainer = MLXTrainer(model, optimizer, grad_accum_steps, train_loader)
 
     if resuming:
         assert resume_ckpt is not None
@@ -400,7 +397,7 @@ def _setup_mlx(
         device_type="mlx",
         ddp_rank=0,
         ddp_world_size=1,
-        device=torch_device,
+        device=torch.device("cpu"),
         synchronize=synchronize,
         get_max_memory=get_max_memory,
         gpu_peak_flops=float("inf"),
