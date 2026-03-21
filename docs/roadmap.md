@@ -6,7 +6,7 @@ read_when:
   - Deciding what to implement next
   - Understanding scope and sequencing
 status: active
-last_updated: "2025-07-24"
+last_updated: "2025-07-10"
 ---
 
 # nanochat Roadmap
@@ -22,7 +22,8 @@ last_updated: "2025-07-24"
 | Phase 1.5.1 — Bugfixes & Tooling | 2026-03-15 | argparse SUPPRESS fix, compression console output, LocalWandb |
 | Phase 2 — Codebase Refactor | 2025-07-15 | Config manager, workspace, scheduler co-location, entry point sub-packages, CLI cleanup |
 | Phase 2.1 — Checkpoint Manager | 2025-07-19 | `CheckpointManager` protocol, typed metadata, `model_factory.py`, `CheckpointConfig` |
-| Phase 2.2 — Dual Trainer / MLX Backend | 2025-07-24 | `BaseTrainer` protocol, `TorchTrainer`, `MLXTrainer`, backend-agnostic `loop.py`, safetensors checkpoint interop, `--backend=mlx` autodetect — see [mlx-backend.md](mlx-backend.md) |
+| Phase 2.2 — Dual Trainer / MLX Backend | 2025-07-24 | `BaseTrainer` protocol, `TorchTrainer`, `MLXTrainer`, backend-agnostic `loop.py`, safetensors checkpoint interop, `--backend=mlx` autodetect, MLX device sync / memory / cache (`hardware.py`), `mx.compile` on forward-backward (`_LossAndGrad`), dtype handling, resume correctness — see [mlx-backend.md](mlx-backend.md) |
+| Phase 2.3 — MLX Base Training Correctness | TBD | Phase 6 analysis fixes: CPU loader for MLX path, dead `model` param removed, SFT mfu guard — see [mlx-analysis-phase6.md](mlx-analysis-phase6.md). First MLX vs MPS performance comparison: [mlx-performance.md](mlx-performance.md) |
 
 ## Active — Phase 1.5: Compression-Based Optimization
 
@@ -62,14 +63,13 @@ Sequencing depends on the Phase 1.5 outcome.
 
 - **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint/discovery.py`.
 
-- **MLX evaluation engine** — KV cache not implemented in `mlx_gpt.py`. Required for `nanochat eval` and `nanochat serve` on the MLX path.
+- **MLX evaluation engine** — KV cache not implemented in `mlx_gpt.py`. Required for `nanochat eval` and `nanochat serve` on the MLX path. No design doc needed until this work starts.
 
-- **MLX SFT / RL** — `MLXTrainer` covers base pretraining only. SFT and RL loops remain PyTorch-only.
+- **MLX SFT / RL** — `MLXTrainer` covers base pretraining only. SFT and RL loops remain PyTorch-only. Foundational fix (CPU loader for MLX path) tracked in [mlx-analysis-phase6.md](mlx-analysis-phase6.md).
 
 - **Safetensors optimizer state** — optimizer state is currently saved with `torch.save` even in `SafetensorsCheckpointManager`. A future improvement would split into tensor buffers (`.safetensors`) and scalar metadata (JSON) to remove the torch dependency entirely. See note in [checkpoint-interop.md](checkpoint-interop.md).
 
 - **`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0`** — disables the MPS memory watermark. Tested on d6 (10 steps): no measurable throughput improvement. May help at larger depths where memory pressure is real.
-
 
 ## MLX / MPS Performance Investigations
 
@@ -81,25 +81,3 @@ Baseline measured on M3 Max, d6, 10 steps, **without** `torch.compile` (eager mo
 | tok/sec     | ~23,000–25,000 |
 
 Note: earlier baseline (~9s/step, ~58k tok/sec) was measured with `torch.compile` active, which causes NaN gradients — those numbers are invalid.
-
-### MLX backend — device_type gap
-
-`_setup_mlx` returns `device_type = "mlx"`, not `"mps"`. Consequences:
-
-- `torch.mps.empty_cache()` is **not called** between steps — the Metal GPU is shared between MLX and PyTorch runtimes, so memory pressure may build up without it.
-- `synchronize` falls through to `lambda: None` in `get_device_sync` — however step timing is still accurate because `MLXTrainer.step()` ends with `mx.eval(model.parameters(), optimizer.state())` which blocks until GPU work completes.
-- `get_max_memory` returns `0` — no memory reporting on the MLX path.
-
-MLX default device is `Device(gpu, 0)` — it always runs on the Metal GPU, there is no device selection. `"cuda"` / `"mps"` are torch backend concepts and don't apply. The correct fix is an explicit `"mlx"` branch in the loop (and `get_device_sync`) rather than reusing `"mps"`.
-
-MLX equivalents identified:
-
-| torch (MPS path)                        | MLX equivalent                   |
-| --------------------------------------- | -------------------------------- |
-| `torch.mps.empty_cache()`               | `mx.metal.clear_cache()`         |
-| `torch.mps.synchronize`                 | `mx.eval` (already in `step()`)  |
-| `torch.mps.current_allocated_memory()`  | `mx.metal.get_active_memory()`   |
-
-Required changes: `hardware.py` `get_device_sync` gains `"mlx"` branch, `loop.py` cache-clear gains `"mlx"` branch, `_setup_mlx` returns `get_max_memory = mx.metal.get_active_memory`.
-
-Full design and implementation plan: [mlx-device-type-refactor.md](mlx-device-type-refactor.md).
