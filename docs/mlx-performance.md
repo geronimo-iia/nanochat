@@ -12,8 +12,46 @@ last_updated: 2025-07-10
 # MLX Performance — Base Training
 
 First honest performance comparison between the MLX and MPS backends for base
-pretraining on Apple Silicon. Numbers to be filled in after
-[mlx-analysis-phase6.md](mlx-analysis-phase6.md) is implemented.
+pretraining on Apple Silicon.
+
+Base dir: `/Users/geronimo/build/sp_theory/experiments/nanochat`
+Nanochat dir: `/Users/geronimo/build/sp_theory/forge/nanochat`
+
+---
+
+## Config file
+
+`/Users/geronimo/build/sp_theory/experiments/nanochat/config.toml` — used as base
+for all benchmark commands. The relevant fields overridden by CLI flags are:
+`--depth`, `--max-seq-len`, `--device-batch-size`, `--total-batch-size`,
+`--num-iterations`, `--eval-every`, `--core-metric-every`, `--sample-every`,
+`--save-every`, `--wandb`, `--track-compression`.
+
+```toml
+[common]
+base_dir = "/Users/geronimo/build/sp_theory/experiments/nanochat"
+device_type = ""              # empty = autodetect (mlx or mps depending on --backend)
+run = "unnamed"
+wandb = "local"
+wandb_project = "nanochat"
+
+[training]
+depth = 8
+aspect_ratio = 64
+head_dim = 128
+max_seq_len = 2048
+window_pattern = "SSSL"
+device_batch_size = 32
+total_batch_size = -1
+embedding_lr = 0.3
+unembedding_lr = 0.008
+matrix_lr = 0.02
+scalar_lr = 0.5
+weight_decay = 0.28
+warmup_steps = 40
+warmdown_ratio = 0.65
+final_lr_frac = 0.05
+```
 
 ---
 
@@ -29,107 +67,189 @@ pretraining on Apple Silicon. Numbers to be filled in after
 
 ---
 
-## Measurement methodology
+## Benchmark configs
 
-### What is measured
+Three configs using the production architecture (`head_dim=128`, `aspect_ratio=64`,
+`seq_len=1024`, `total_batch_size=524288`):
 
-- `dt` — wall-clock time per training step in seconds, including forward, backward,
-  optimizer update, and `mx.eval` / `synchronize` blocking call
-- `tok/sec` — `total_batch_size / dt`
-- Peak memory — reported at end of run (`get_max_memory()`)
+| Config | depth | seq_len | params | flops/token | device_batch_size |
+|--------|-------|---------|--------|-------------|-------------------|
+| d6     | 6     | 1024    | 74M    | 1.57e8      | TBD (probe below) |
+| d8     | 8     | 1024    | 126M   | 2.83e8      | TBD (probe below) |
+| d12    | 12    | 1024    | 286M   | 7.31e8      | TBD (probe below) |
 
-### What is not measured
-
-- Data loading time — the torch dataloader runs on CPU for both backends; its cost
-  is amortized and not included in `dt`
-- First-step JIT warmup — MLX and `mx.compile` have a compilation cost on step 0;
-  numbers are taken from steps 5–20 after warmup
-
-### Conditions
-
-- `--wandb=disabled` — no network overhead
-- `--eval-every=0` — no validation interruptions
-- `--sample-every=0` — no sampling interruptions
-- `--save-every=0` — no checkpoint I/O during measurement window
-- `--num-iterations=25` — 25 steps total, discard first 5, average steps 5–20
-- Fresh process each run — no cross-contamination between backends
-- Machine otherwise idle — no background GPU workloads
-
-### Commands
-
-**MLX:**
-```bash
-nanochat train base \
-    --depth=<D> \
-    --max-seq-len=<T> \
-    --device-batch-size=<B> \
-    --total-batch-size=<BT> \
-    --num-iterations=25 \
-    --eval-every=0 \
-    --sample-every=0 \
-    --save-every=0 \
-    --wandb=disabled
-# --backend=mlx autodetected
-```
-
-**MPS:**
-```bash
-nanochat train base \
-    --backend=torch \
-    --device-type=mps \
-    --depth=<D> \
-    --max-seq-len=<T> \
-    --device-batch-size=<B> \
-    --total-batch-size=<BT> \
-    --num-iterations=25 \
-    --eval-every=0 \
-    --sample-every=0 \
-    --save-every=0 \
-    --wandb=disabled
-```
+d8 is the production model. d6 is the fast iteration baseline. d12 is the depth
+stress test. All use `total_batch_size=524288` — grad accumulation adjusts automatically.
 
 ---
 
-## Benchmark configs
+## Step 1 — Find max device_batch_size
 
-Three configs covering small, medium, and large models on M3 Max.
+Run the OOM probe for each config on **both backends**. Start high and halve until
+it runs cleanly for 3 steps. Use the lower of the two backends as the common baseline.
 
-| Config | depth | seq_len | params | flops/token | device_batch_size | total_batch_size |
-|--------|-------|---------|--------|-------------|-------------------|------------------|
-| d6     | 6     | 1024    | 74M    | 1.57e8      | TBD               | TBD              |
-| d12    | 12    | 1024    | 286M   | 7.31e8      | TBD               | TBD              |
-| d20    | 20    | 2048    | 897M   | 3.00e9      | TBD               | TBD              |
+### d6 probe
 
-`device_batch_size` to be set to the largest value that fits in memory without OOM
-on both backends (use the more constrained backend as the common baseline).
+```bash
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+
+# MLX — try B=64
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx \
+    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=64 --total-batch-size=524288 \
+    --num-iterations=3 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+
+# MPS — try B=64
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=torch \
+    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=64 --total-batch-size=524288 \
+    --num-iterations=3 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+```
+
+d6 max `device_batch_size`: MLX=**TBD** MPS=**TBD** → baseline=**TBD**
+
+### d8 probe
+
+```bash
+# MLX — try B=32
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx \
+    train base --depth=8 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=32 --total-batch-size=524288 \
+    --num-iterations=3 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+
+# MPS — try B=32
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=torch \
+    train base --depth=8 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=32 --total-batch-size=524288 \
+    --num-iterations=3 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+```
+
+d8 max `device_batch_size`: MLX=**TBD** MPS=**TBD** → baseline=**TBD**
+
+### d12 probe
+
+```bash
+# MLX — try B=16
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx \
+    train base --depth=12 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=16 --total-batch-size=524288 \
+    --num-iterations=3 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+
+# MPS — try B=16
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=torch \
+    train base --depth=12 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=16 --total-batch-size=524288 \
+    --num-iterations=3 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+```
+
+d12 max `device_batch_size`: MLX=**TBD** MPS=**TBD** → baseline=**TBD**
+
+---
+
+## Step 2 — Benchmark runs
+
+Once `device_batch_size` is confirmed, run 25 iterations per config per backend.
+Read tok/sec from steps 5–20 in the console output (skip step 0 JIT warmup).
+
+### d6
+
+```bash
+# MLX
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx \
+    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=<B_d6> --total-batch-size=524288 \
+    --num-iterations=25 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+
+# MPS
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=torch \
+    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=<B_d6> --total-batch-size=524288 \
+    --num-iterations=25 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+```
+
+### d8
+
+```bash
+# MLX
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx \
+    train base --depth=8 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=<B_d8> --total-batch-size=524288 \
+    --num-iterations=25 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+
+# MPS
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=torch \
+    train base --depth=8 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=<B_d8> --total-batch-size=524288 \
+    --num-iterations=25 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+```
+
+### d12
+
+```bash
+# MLX
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx \
+    train base --depth=12 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=<B_d12> --total-batch-size=524288 \
+    --num-iterations=25 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+
+# MPS
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=torch \
+    train base --depth=12 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=<B_d12> --total-batch-size=524288 \
+    --num-iterations=25 --eval-every=0 --core-metric-every=0 \
+    --sample-every=0 --save-every=0 --wandb=disabled --track-compression=false
+```
 
 ---
 
 ## Results
 
-### d6 — 74M params, seq=1024
+### d6 — 74M params, seq=1024, B=TBD
 
 | Backend | Precision | dt (s) | tok/sec | Peak memory |
 |---------|-----------|--------|---------|-------------|
 | MLX     | bfloat16  | TBD    | TBD     | TBD         |
 | MPS     | float16   | TBD    | TBD     | TBD         |
-| Ratio MLX/MPS | — | —  | TBD     | —           |
+| Ratio MLX/MPS | — | —    | TBD     | —           |
 
-### d12 — 286M params, seq=1024
-
-| Backend | Precision | dt (s) | tok/sec | Peak memory |
-|---------|-----------|--------|---------|-------------|
-| MLX     | bfloat16  | TBD    | TBD     | TBD         |
-| MPS     | float16   | TBD    | TBD     | TBD         |
-| Ratio MLX/MPS | — | —  | TBD     | —           |
-
-### d20 — 897M params, seq=2048
+### d8 — 126M params, seq=1024, B=TBD
 
 | Backend | Precision | dt (s) | tok/sec | Peak memory |
 |---------|-----------|--------|---------|-------------|
 | MLX     | bfloat16  | TBD    | TBD     | TBD         |
 | MPS     | float16   | TBD    | TBD     | TBD         |
-| Ratio MLX/MPS | — | —  | TBD     | —           |
+| Ratio MLX/MPS | — | —    | TBD     | —           |
+
+### d12 — 286M params, seq=1024, B=TBD
+
+| Backend | Precision | dt (s) | tok/sec | Peak memory |
+|---------|-----------|--------|---------|-------------|
+| MLX     | bfloat16  | TBD    | TBD     | TBD         |
+| MPS     | float16   | TBD    | TBD     | TBD         |
+| Ratio MLX/MPS | — | —    | TBD     | —           |
 
 ---
 
@@ -154,8 +274,8 @@ This is expected and documented in [m3-max-guide.md](m3-max-guide.md).
 
 ## Interpretation notes
 
-- tok/sec is the primary metric — it captures the full step cost including optimizer
+- tok/sec is the primary metric — captures full step cost including optimizer
+- d8 is the most important number — it is the production model
 - Memory comparison is informative but not directly comparable: bfloat16 (MLX) vs
-  float16 + GradScaler state (MPS) have different memory footprints
-- d6 is the most reliable config for iteration — fast enough to run many times
-- d20 is the stress test — most sensitive to memory bandwidth and compile quality
+  float16 + GradScaler state (MPS) have different footprints
+- d12 shows how the gap scales with depth — compile benefit grows with compute intensity
