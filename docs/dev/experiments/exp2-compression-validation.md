@@ -18,7 +18,7 @@ last_updated: "2025-07-25"
 ### Compression metrics (every 50 steps)
 
 | step | entropy | ratio  | gzip   | efficiency |
-|------|---------|--------|--------|------------|
+| ---- | ------- | ------ | ------ | ---------- |
 | 0    | 10.637  | 0.6995 | 4.4969 | 0.0666     |
 | 50   | 10.598  | 0.6041 | 4.4624 | 0.0575     |
 | 100  | 10.614  | 0.4583 | 4.4596 | 0.0436     |
@@ -33,7 +33,7 @@ last_updated: "2025-07-25"
 ### Validation bpb (every 250 steps)
 
 | step | val/bpb  |
-|------|----------|
+| ---- | -------- |
 | 0    | 3.212615 |
 | 250  | 5.537459 |
 | 464  | 5.560884 |
@@ -72,36 +72,84 @@ note below). By step 250 the model had learned something, but the val set is har
 the step-0 eval batch, so bpb appears to increase. The step-0 bpb of 3.21 vs expected
 ~15 bpb for a random model is a separate anomaly worth investigating.
 
-**Fix**: pass `inputs=[orig_model]` to `mx.compile` so the compiler re-reads model
-parameters on each call:
+**Fix**: pass both `inputs=[orig_model]` and `outputs=[orig_model]` to `mx.compile`:
 
 ```python
-self._loss_and_grad = mx.compile(loss_and_grad, inputs=[orig_model])
+self._loss_and_grad = mx.compile(loss_and_grad, inputs=[orig_model], outputs=[orig_model])
 ```
 
-`outputs=` is not needed — the optimizer updates params outside the compiled function.
+`inputs=[orig_model]` ensures the compiler re-reads model parameters on each call.
+`outputs=[orig_model]` is also required because `nn.value_and_grad` internally calls
+`model.update(params)` — it modifies `orig_model`'s parameters as a side effect inside
+the compiled function. Without `outputs=`, MLX doesn't track this write, and after any
+`mx.eval()` on model outputs (e.g. during validation), the next compiled call produces
+grad arrays disconnected from the computation graph, crashing with
+`RuntimeError: Attempting to eval an array without a primitive`.
 
 **Impact**: this bug affected every MLX training run. The model was learning (optimizer
 state, compression ratio, val/bpb all changed) but the logged `train/loss` was always
 the initialization value. All Experiment 1 and Experiment 2 loss values in the logs are
 invalid. Experiment 2 must be re-run after the fix.
 
-**Regression test added**: `test_compiled_loss_sees_updated_params` in
-`tests/test_training/test_mlx_trainer.py` — verifies that the compiled loss function
-returns a different value after an optimizer step.
+**Regression tests added** in `tests/test_training/test_mlx_trainer.py`:
+- `test_compiled_loss_sees_updated_params` — verifies compiled loss sees updated weights
+- `test_eval_context_restores_train_mode` — verifies `eval_context()` + `mx.eval` followed
+  by `forward_backward()` does not crash (catches the missing `outputs=` bug)
 
-### val/bpb increasing (3.21 → 5.54 → 5.56)
+### val/bpb increasing (3.21 → 5.54 → 5.56) — root cause identified
 
-val/bpb increases from step 0 to step 250, then plateaus. This is the opposite of expected
-behavior. Two possible explanations:
+**Root cause**: stale-gradient drift from the `mx.compile` bug, plus a misread of what
+"random model bpb" should be.
 
-1. The model is not learning (consistent with flat loss hypothesis above)
-2. The eval set at step 0 is different from subsequent evals (e.g. different data split or
-   the step-0 eval runs before any training, on a different distribution)
+#### Why step-0 bpb is 3.21 (not anomalously low)
 
-The step-0 bpb of `3.21` is suspiciously low compared to `5.54` at step 250. A fresh random
-model should have bpb close to `log2(vocab_size)` = 15 bits. `3.21` suggests either the
-step-0 eval is on a trivially easy subset, or there is a bug in the step-0 eval path.
+The experiment doc initially flagged 3.21 as suspicious by comparing it to
+`log2(32768) = 15 bits/token`. That comparison is wrong — val/bpb is bits **per byte**,
+not bits per token. The tokenizer byte distribution:
+
+```
+avg bytes per token: 6.57  (measured on token_bytes.pt)
+theoretical bpb (uniform model): ln(32768) / (ln(2) * 6.57) ≈ 2.28 bpb
+```
+
+So the theoretical floor for a fully random model is **2.28 bpb**, not 15. A step-0 bpb
+of 3.21 is slightly above this floor — consistent with a near-random model whose logits
+are not perfectly uniform at initialization (softcap + non-zero weights). No anomaly.
+
+#### Why val/bpb increases from 3.21 → 5.54 → 5.56
+
+This is a direct consequence of the `mx.compile` stale-params bug, but the mechanism is
+more subtle than just "loss is wrong":
+
+- The compiled `_loss_and_grad` held references to the **initial** weight arrays
+- Every step, gradients were computed at those **fixed initial weights**, not at the
+  current model state
+- The optimizer applied these stale-direction gradients to the actual model params,
+  which were being replaced by `model.update(...)` each step
+- Result: the model was pushed repeatedly in the gradient direction at initialization —
+  effectively a fixed-direction drift uncoupled from the current model state
+
+This explains the apparent contradiction between signals:
+
+| Signal                          | What it measured                                          | Conclusion                            |
+| ------------------------------- | --------------------------------------------------------- | ------------------------------------- |
+| `train/loss = 10.5`             | Loss of initial (random) weights, always                  | Invalid — stale params                |
+| `compression ratio 0.70 → 0.40` | Real model output via `forward_logits` (bypasses compile) | Valid — model IS changing             |
+| `val/bpb 3.21 → 5.54 → 5.56`    | Real model output on val set (eval path bypasses compile) | Valid — model genuinely getting worse |
+| `step-0 bpb = 3.21`             | Random init, avg 6.57 bytes/token                         | Expected — floor is 2.28              |
+
+The compression ratio improved because `forward_logits()` calls `self._orig_model(x)`
+directly. The actual model parameters were drifting — just in a pathological direction
+driven by stale gradients from the initial weights. That direction happens to reduce theƒ
+initial model's loss on training data while making the model worse at predicting real
+val sequences.
+
+The val loader always starts from the beginning of the val split (confirmed: `build_val_loader`
+constructs a fresh loader on each eval call), so data distribution shift between evals is
+ruled out.
+
+**After the `inputs=[orig_model]` fix**, gradients are computed at the current model state
+each step. Val/bpb should decrease monotonically from ~3.21 as training proceeds.
 
 ### Compression ratio moves despite flat logged loss
 
@@ -127,6 +175,6 @@ correlate against. Next experiment should set `compression-log-every` to a divis
 ## Next Steps
 
 1. ~~Investigate loss logging~~ — root cause found and fixed (`mx.compile` stale params)
-2. Investigate val/bpb at step 0 — why is it 3.21 when a fresh random model should be ~15 bpb?
+2. ~~Investigate val/bpb at step 0~~ — resolved: theoretical floor is 2.28 bpb (avg 6.57 bytes/token); 3.21 is normal. Val/bpb increase is stale-gradient drift from the compile bug.
 3. Fix experiment config: align `compression-log-every` with `eval-every`
 4. Re-run Experiment 2 with the fix to get valid loss and correlation data

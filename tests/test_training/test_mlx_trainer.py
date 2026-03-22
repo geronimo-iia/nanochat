@@ -147,10 +147,14 @@ def test_step_lr_does_not_compound():
 
 def test_eval_context_restores_train_mode():
     trainer = _trainer()
-    with trainer.eval_context():
-        pass
-    # MLX nn.Module doesn't expose training flag directly — verify no exception
-    # and that forward still works after context exit
+    with trainer.eval_context() as model:
+        # Run an actual forward pass + mx.eval, matching what evaluate_bpb_mlx does.
+        # Without outputs=[orig_model] in mx.compile, the subsequent forward_backward()
+        # crashes with "Attempting to eval an array without a primitive".
+        rng = np.random.default_rng(1)
+        x = mx.array(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32))
+        logits = model(x)
+        mx.eval(logits)
     trainer.forward_backward()
 
 
@@ -177,6 +181,57 @@ def test_loader_state_preserved_across_forward_backward():
 
     trainer.forward_backward()
     assert call_count == 1 + 2 * grad_accum_steps  # second step continues from where we left off
+
+
+def test_grad_clip_large_grads_stay_finite():
+    """Gradient clipping must keep weights finite when a large gradient spike occurs."""
+    trainer = _trainer()
+    trainer.forward_backward()
+    assert trainer._accumulated_grads is not None
+    # Simulate a large gradient spike
+    trainer._accumulated_grads = mlx_nn.utils.tree_map(
+        lambda g: g * 1e4, trainer._accumulated_grads
+    )
+    trainer.step(lr_multiplier=1.0, momentum=0.95, weight_decay=0.0)
+    # Model weights must remain finite after the clipped update
+    params = dict(mlx_nn.utils.tree_flatten(trainer._orig_model.parameters()))
+    mx.eval(list(params.values()))
+    assert all(np.isfinite(np.array(v)).all() for v in params.values()), \
+        "model weights contain NaN/Inf after large-gradient step"
+
+
+def test_nan_guard_skips_bad_step():
+    """NaN loss must not corrupt model weights (observed: step 28 NaN in exp2 run).
+
+    Without the NaN guard, NaN loss → NaN grads → NaN weights → NaN forever.
+    With the guard, forward_backward() zeros the grads and the optimizer skips the update.
+    """
+    trainer = _trainer()
+    # Snapshot weights before the NaN step
+    before = {k: np.array(v) for k, v in
+              mlx_nn.utils.tree_flatten(trainer._orig_model.trainable_parameters())}
+
+    # Monkeypatch _loss_and_grad to return NaN loss, simulating the step-28 failure
+    real_lag = trainer._loss_and_grad
+    call_count = [0]
+    def nan_loss_and_grad(x, y):
+        call_count[0] += 1
+        loss, grads = real_lag(x, y)
+        return mx.array(float("nan")), grads
+    trainer._loss_and_grad = nan_loss_and_grad
+
+    result = trainer.forward_backward()
+    assert not np.isfinite(result.loss)  # loss is NaN as reported
+
+    trainer._loss_and_grad = real_lag  # restore
+    trainer.step(lr_multiplier=1.0, momentum=0.95, weight_decay=0.0)
+
+    # Weights must be finite — the guard zeroed grads so NaN did not propagate
+    # (AdamW weight_decay may still cause small changes, so we check finiteness not equality)
+    after = dict(mlx_nn.utils.tree_flatten(trainer._orig_model.trainable_parameters()))
+    mx.eval(list(after.values()))
+    assert all(np.isfinite(np.array(v)).all() for v in after.values()), \
+        "model weights contain NaN/Inf — NaN guard did not protect weights"
 
 
 def test_eval_context_restores_on_exception():

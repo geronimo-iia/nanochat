@@ -28,8 +28,9 @@ PYTHONUNBUFFERED=1 nohup uv run nanochat \
     --max-seq-len=1024 \
     --device-batch-size=64 \
     --total-batch-size=524288 \
+    --num-iterations=1500 \
     --track-compression \
-    --compression-log-every=50 \
+    --compression-log-every=250 \
     --eval-every=250 \
     --eval-tokens=5242880 \
     --core-metric-every=-1 \

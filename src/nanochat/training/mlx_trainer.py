@@ -4,6 +4,7 @@ MLXTrainer — BaseTrainer implementation for Apple Silicon via MLX.
 Single-device only. No FP8, no DDP, no GradScaler.
 """
 
+import math
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -43,7 +44,7 @@ class MLXTrainer:
         self._grad_accum_steps = grad_accum_steps
         self._loader = torch_loader
         loss_and_grad = _LossAndGrad(orig_model)
-        self._loss_and_grad = mx.compile(loss_and_grad, inputs=[orig_model])
+        self._loss_and_grad = mx.compile(loss_and_grad, inputs=[orig_model], outputs=[orig_model])
 
         # Snapshot initial LRs for scheduler multiplication
         for group in optimizer._groups:
@@ -71,16 +72,24 @@ class MLXTrainer:
         accumulated_grads = None
         train_loss = 0.0
 
+        nan_step = False
         for _ in range(self._grad_accum_steps):
             loss, grads = self._loss_and_grad(self._x, self._y)
             mx.eval(loss, grads)
             train_loss = loss.item()
-            if accumulated_grads is None:
-                accumulated_grads = grads
-            else:
-                accumulated_grads = nn.utils.tree_map(
-                    lambda a, b: a + b, accumulated_grads, grads
-                )
+            if not math.isfinite(train_loss):
+                # NaN/Inf loss — zero grads so optimizer skips this step.
+                # Keeps valid weights from previous step; training may recover next batch.
+                nan_step = True
+                if accumulated_grads is None:
+                    accumulated_grads = nn.utils.tree_map(mx.zeros_like, grads)
+            elif not nan_step:
+                if accumulated_grads is None:
+                    accumulated_grads = grads
+                else:
+                    accumulated_grads = nn.utils.tree_map(
+                        lambda a, b: a + b, accumulated_grads, grads
+                    )
             self._x, self._y, self._loader_state = self._next_batch()
 
         assert accumulated_grads is not None
@@ -96,6 +105,14 @@ class MLXTrainer:
     def reprime(self) -> None:
         self._x, self._y, self._loader_state = self._next_batch()
 
+    @staticmethod
+    def _clip_grads(grads: dict, max_norm: float = 1.0) -> dict:
+        flat = [v for _, v in nn.utils.tree_flatten(grads)]
+        total_norm_sq = sum(mx.sum(mx.square(v.astype(mx.float32))) for v in flat)
+        total_norm = mx.sqrt(total_norm_sq)
+        scale = max_norm / mx.maximum(total_norm, mx.array(max_norm))
+        return nn.utils.tree_map(lambda g: g * scale, grads)
+
     def step(self, lr_multiplier: float, momentum: float, weight_decay: float) -> None:
         assert self._accumulated_grads is not None, "step() called before forward_backward()"
         for group in self._optimizer._groups:
@@ -104,7 +121,8 @@ class MLXTrainer:
                 group["momentum"] = momentum
                 group["weight_decay"] = weight_decay
 
-        self._optimizer.update(self._orig_model, self._accumulated_grads)
+        clipped_grads = self._clip_grads(self._accumulated_grads)
+        self._optimizer.update(self._orig_model, clipped_grads)
         mx.eval(self._orig_model.parameters(), self._optimizer.state())
 
     def forward_logits(self) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:

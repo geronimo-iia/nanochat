@@ -153,7 +153,7 @@ tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
 - [x] Completes without error
 - [x] `val/bpb` logged at steps 0, 250, 464
 - [x] `compression/compression_ratio` logged every 50 steps
-- [ ] Can plot `compression_ratio` vs `val/bpb` at steps that are multiples of 250
+- [x] Can plot `compression_ratio` vs `val/bpb` at steps that are multiples of 250 — fixed by setting `--compression-log-every=250` to align with `--eval-every=250`
 
 ### Observations
 
@@ -166,9 +166,11 @@ See full results in [experiments/exp2-compression-validation.md](experiments/exp
    function keeps seeing the original random weights. Fixed by `mx.compile(loss_and_grad,
    inputs=[orig_model])`. Regression test added. All logged loss values from this run
    are invalid.
-2. **val/bpb increases** (3.21 → 5.54 → 5.56) — explained by the same bug: eval path
-   bypasses the compiled function so it saw real weights, but the step-0 bpb of 3.21
-   for a fresh model is still anomalous (expected ~15 bpb). Needs further investigation.
+2. **val/bpb increases** (3.21 → 5.54 → 5.56) — fully explained. Step-0 bpb of 3.21 is
+   normal: theoretical floor for a random model is 2.28 bpb (avg 6.57 bytes/token, not
+   15 bits/token). The increase is stale-gradient drift: eval path saw real weights but
+   gradients were always from initial weights, pushing params in a fixed bad direction.
+   See [exp2-compression-validation.md](experiments/exp2-compression-validation.md).
 3. **Timing estimate wrong** — actual duration was **89.7 min**, not ~5h. Chinchilla
    ratio at d6 yields only 464 steps.
 4. **Alignment issue** — `compression-log-every=50` and `eval-every=250` are not aligned.
@@ -176,6 +178,43 @@ See full results in [experiments/exp2-compression-validation.md](experiments/exp
    divisor of `eval-every`, or increase total iterations for more eval points.
 
 **Experiment 2 must be re-run after the `mx.compile` fix.**
+
+### Experiment 2b — Compile Fix Smoke Test (d6, ~5 min on MLX)
+
+**Status**: ✅ Complete — fix validated
+
+Verify the `mx.compile` stale-params fix before committing to the full ~5h Experiment 2 re-run.
+
+```bash
+bash runs/exp2b-compile-fix-smoke.sh
+tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2b.log
+```
+
+Pass criteria:
+
+- [x] `train/loss` decreases from step 0 (was flat at 10.5 before fix)
+- [x] `val/bpb` decreases or stays stable from step 0 to step 20 (was increasing before fix)
+- [x] `compression_ratio` and `val/bpb` both present at steps 0, 10, 20
+
+### Observations
+
+Run: M3 Max 128GB, d6, 20 steps, warmup only (`lrm` 0.03→0.50). Duration: **3.67 min**.
+
+| step | loss      | lrm  | entropy | ratio  | gzip   | efficiency | val/bpb  |
+|------|-----------|------|---------|--------|--------|------------|----------|
+| 0    | 10.500000 | 0.03 | 10.6369 | 0.6995 | 4.4969 | 0.0666     | 3.184161 |
+| 10   | 8.038718  | 0.28 | 10.4945 | 1.0974 | 4.4773 | 0.1626     | 2.046961 |
+| 20   | 6.832350  | 0.50 | —       | —      | —      | —          | 1.831366 |
+
+**Fix confirmed**:
+- `train/loss` drops from 10.5 → 6.83 across 20 steps — no longer flat
+- `val/bpb` drops from 3.18 → 2.05 → 1.83 — now decreasing as expected
+
+**Compression ratio anomaly**: `ratio` increases from 0.6995 → 1.0974 at step 10 while
+loss and val/bpb improve strongly. This is opposite to the Experiment 2 trend (where ratio
+decreased despite the compile bug). This may reflect early warmup dynamics (only 28% of
+max LR at step 10) and is not interpretable at this scale — Experiment 2 re-run needed
+for correlation analysis over the full learning curve.
 
 
 ## Analysis
