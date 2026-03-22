@@ -11,7 +11,7 @@ last_updated: "2025-07-25"
 **Implementation**: ✅ `CompressionMetrics` class + training loop integration complete  
 **Pipeline smoke test**: ✅ base train → SFT → chat validated end-to-end on MPS (Apple Silicon M3 Max)  
 **Hardware**: MLX only (Apple Silicon M3 Max) — d6 only for initial validation  
-**Next step**: Run Experiment 1 (smoke test), then proceed in order.
+**Next step**: Investigate flat loss and val/bpb anomalies from Experiment 2 before re-running.
 
 ## Pre-Flight
 
@@ -139,9 +139,9 @@ Resume validation from log (`exp1b.log`):
 - `rg` (dataloader shard position) correctly restored — dataloader state resumed
 - Loss continues declining steps 6–9 (`10.22 → 10.14 → 10.07 → 10.02`) — optimizer momentum restored
 
-### Experiment 2 — Short Validation (d6, ~5h on MLX)
+### Experiment 2 — Short Validation (d6, ~90 min on MLX)
 
-**Status**: 🟡 Running — PID 24697, started 2025-07-25
+**Status**: ✅ Complete
 
 Collect enough data points to analyze correlation.
 
@@ -150,18 +150,32 @@ bash runs/exp2-compression-validation.sh
 tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
 ```
 
-- [ ] Completes without error
-- [ ] `val/bpb` logged every 250 steps
-- [ ] `compression/compression_ratio` logged every 50 steps
+- [x] Completes without error
+- [x] `val/bpb` logged at steps 0, 250, 464
+- [x] `compression/compression_ratio` logged every 50 steps
 - [ ] Can plot `compression_ratio` vs `val/bpb` at steps that are multiples of 250
 
+### Observations
 
-run:
+See full results in [experiments/exp2-compression-validation.md](experiments/exp2-compression-validation.md).
 
+**Blocking issues found**:
 
-Starting Experiment 2 — log: /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
-PID: 24697
-Monitor: tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
+1. **Loss flat at 10.5 for all 464 steps** — root cause: `mx.compile` without `inputs=`
+   captures parameter arrays at compile time. After each `model.update()` the compiled
+   function keeps seeing the original random weights. Fixed by `mx.compile(loss_and_grad,
+   inputs=[orig_model])`. Regression test added. All logged loss values from this run
+   are invalid.
+2. **val/bpb increases** (3.21 → 5.54 → 5.56) — explained by the same bug: eval path
+   bypasses the compiled function so it saw real weights, but the step-0 bpb of 3.21
+   for a fresh model is still anomalous (expected ~15 bpb). Needs further investigation.
+3. **Timing estimate wrong** — actual duration was **89.7 min**, not ~5h. Chinchilla
+   ratio at d6 yields only 464 steps.
+4. **Alignment issue** — `compression-log-every=50` and `eval-every=250` are not aligned.
+   Only step 250 has both metrics. Next run should set `compression-log-every` to a
+   divisor of `eval-every`, or increase total iterations for more eval points.
+
+**Experiment 2 must be re-run after the `mx.compile` fix.**
 
 
 ## Analysis

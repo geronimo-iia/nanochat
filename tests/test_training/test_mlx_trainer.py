@@ -56,7 +56,22 @@ def test_forward_backward_loss_finite():
     assert np.isfinite(result.loss)
 
 
-def test_step_changes_params():
+def test_compiled_loss_sees_updated_params():
+    """mx.compile must re-read model params after each optimizer step.
+
+    Without inputs=[model] in mx.compile, the compiled graph captures parameter
+    arrays at compile time and ignores subsequent model.update() calls — loss
+    stays flat at initialization entropy for the entire run.
+    """
+    trainer = _trainer()
+    result0 = trainer.forward_backward()
+    trainer.step(lr_multiplier=1.0, momentum=0.95, weight_decay=0.0)
+    result1 = trainer.forward_backward()
+    # Loss must differ — compiled fn must see updated weights
+    assert result0.loss != result1.loss
+
+
+
     trainer = _trainer()
     before = {k: np.array(v) for k, v in
               mlx_nn.utils.tree_flatten(trainer._orig_model.trainable_parameters())}

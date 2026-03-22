@@ -18,7 +18,7 @@ from nanochat.training.mlx_optimizer import MuonAdamW
 
 
 class _LossAndGrad(nn.Module):
-    """Thin nn.Module wrapper so mx.compile can capture model parameters as state."""
+    """Thin nn.Module wrapper so nn.value_and_grad can capture model parameters."""
 
     def __init__(self, model: "GPT") -> None:
         super().__init__()
@@ -43,7 +43,7 @@ class MLXTrainer:
         self._grad_accum_steps = grad_accum_steps
         self._loader = torch_loader
         loss_and_grad = _LossAndGrad(orig_model)
-        self._loss_and_grad = mx.compile(loss_and_grad)
+        self._loss_and_grad = mx.compile(loss_and_grad, inputs=[orig_model])
 
         # Snapshot initial LRs for scheduler multiplication
         for group in optimizer._groups:
