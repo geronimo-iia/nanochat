@@ -104,6 +104,8 @@ Conclusion: pipeline is healthy. Experiment 2 needed for real correlation analys
 
 ### Experiment 2 — Short Validation (d6, ~5h on MLX)
 
+**Status**: 🟡 Running — PID 24697, started 2025-07-25
+
 Collect enough data points to analyze correlation.
 
 ```bash
@@ -115,6 +117,15 @@ tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
 - [ ] `val/bpb` logged every 250 steps
 - [ ] `compression/compression_ratio` logged every 50 steps
 - [ ] Can plot `compression_ratio` vs `val/bpb` at steps that are multiples of 250
+
+
+run:
+
+
+Starting Experiment 2 — log: /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
+PID: 24697
+Monitor: tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
+
 
 ## Analysis
 
