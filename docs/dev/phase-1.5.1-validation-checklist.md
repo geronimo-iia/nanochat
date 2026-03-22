@@ -76,6 +76,32 @@ without OOM risk (default 41943040 = 640 steps would OOM before the fix).
 - [x] `compression/compression_ratio` logged to wandb
 - [x] `val/bpb` logged at step 10 and 20 without OOM
 
+### Observations
+
+Run: M3 Max 128GB, d6, 20 steps, warmup only (`lrm` 0.03→0.50).
+
+| step | entropy | ratio | gzip  | efficiency | val/bpb |
+|------|---------|-------|-------|------------|---------|
+| 0    | 10.637  | 0.700 | 4.497 | 0.067      | 3.184   |
+| 5    | 10.550  | 0.752 | 4.463 | 0.072      | —       |
+| 10   | 10.495  | 0.615 | 4.477 | 0.059      | 3.561   |
+| 15   | 10.602  | 0.596 | 4.418 | 0.057      | —       |
+| 20   | —       | —     | —     | —          | 3.807   |
+
+- **Loss flat at 10.5** — model hasn't started learning, still in warmup. No conclusions
+  about loss/compression correlation possible at this scale.
+- **Compression ratio moves before loss does** — `ratio` drops 0.700 → 0.596 while loss
+  is still flat. If this holds at longer runs, compression could be an earlier convergence
+  indicator than val/bpb. This is the core hypothesis for Phase 1.5.
+- **val/bpb increasing** (3.18 → 3.56 → 3.81) — expected on a fresh model in warmup
+  with very few tokens seen.
+- **`efficiency` tracks `ratio` closely** — correlated by construction, not independently
+  informative at this stage.
+- **Peak memory 28GB** — healthy, well within 128GB unified memory budget.
+- **Throughput ~46–47k tok/sec** — consistent with MLX baseline.
+
+Conclusion: pipeline is healthy. Experiment 2 needed for real correlation analysis.
+
 ### Experiment 2 — Short Validation (d6, ~5h on MLX)
 
 Collect enough data points to analyze correlation.
