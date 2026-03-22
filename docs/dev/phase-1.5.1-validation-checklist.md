@@ -107,20 +107,9 @@ Conclusion: pipeline is healthy. Experiment 2 needed for real correlation analys
 Collect enough data points to analyze correlation.
 
 ```bash
-cd /Users/geronimo/build/sp_theory/forge/nanochat
-nohup uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
-    --backend=mlx --wandb=local --run=compression-validation-d6 \
-    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
-    --device-batch-size=64 --total-batch-size=524288 \
-    --track-compression --compression-log-every=50 \
-    --eval-every=250 --eval-tokens=5242880 \
-    --core-metric-every=-1 --sample-every=-1 \
-    > /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log 2>&1 &
-echo "PID: $!"
+bash runs/exp2-compression-validation.sh
+tail -f /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log
 ```
-
-`--eval-tokens=5242880` = 80 eval steps per val/bpb measurement — statistically solid,
-~90s overhead per eval at 46k tok/sec.
 
 - [ ] Completes without error
 - [ ] `val/bpb` logged every 250 steps
