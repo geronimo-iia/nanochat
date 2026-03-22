@@ -41,7 +41,7 @@ class MLXTrainer:
         self._orig_model = orig_model
         self._optimizer = optimizer
         self._grad_accum_steps = grad_accum_steps
-        self._torch_loader = torch_loader
+        self._loader = torch_loader
         loss_and_grad = _LossAndGrad(orig_model)
         self._loss_and_grad = mx.compile(loss_and_grad)
 
@@ -60,7 +60,7 @@ class MLXTrainer:
         self._last_y = self._y
 
     def _next_batch(self) -> tuple[mx.array, mx.array, dict]:
-        x, y, state = next(self._torch_loader)
+        x, y, state = next(self._loader)
         return mx.array(x.numpy()), mx.array(y.numpy()), state
 
     def forward_backward(self) -> StepResult:
