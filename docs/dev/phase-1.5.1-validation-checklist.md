@@ -108,13 +108,19 @@ Collect enough data points to analyze correlation.
 
 ```bash
 cd /Users/geronimo/build/sp_theory/forge/nanochat
-uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+nohup uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
     --backend=mlx --wandb=local --run=compression-validation-d6 \
     train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
     --device-batch-size=64 --total-batch-size=524288 \
     --track-compression --compression-log-every=50 \
-    --eval-every=250 --core-metric-every=0 --sample-every=0 --save-every=-1
+    --eval-every=250 --eval-tokens=5242880 \
+    --core-metric-every=-1 --sample-every=-1 \
+    > /Users/geronimo/build/sp_theory/experiments/nanochat/exp2.log 2>&1 &
+echo "PID: $!"
 ```
+
+`--eval-tokens=5242880` = 80 eval steps per val/bpb measurement — statistically solid,
+~90s overhead per eval at 46k tok/sec.
 
 - [ ] Completes without error
 - [ ] `val/bpb` logged every 250 steps
