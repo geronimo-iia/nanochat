@@ -8,6 +8,36 @@ import torch
 import torch.distributed as dist
 
 
+def evaluate_bpb_mlx(model: object, batches: object, steps: int, token_bytes_torch: torch.Tensor) -> float:
+    """MLX equivalent of evaluate_bpb. Converts torch CPU tensors to mx.array inline."""
+    import mlx.core as mx
+    import mlx.nn as nn
+
+    token_bytes_mx = mx.array(token_bytes_torch.numpy())  # (vocab_size,) — converted once
+    vocab_size = int(token_bytes_mx.shape[0])
+    total_nats = mx.array(0.0)
+    total_bytes = mx.array(0)
+    batch_iter = iter(batches)
+
+    for _ in range(steps):
+        x, y = next(batch_iter)
+        x_mx = mx.array(x.numpy())
+        y_mx = mx.array(y.numpy())
+        logits = model(x_mx)                                                        # (B, T, vocab)
+        loss_1d = nn.losses.cross_entropy(
+            logits.reshape(-1, vocab_size), y_mx.reshape(-1), reduction="none"
+        )                                                                            # (B*T,)
+        num_bytes = token_bytes_mx[y_mx.reshape(-1)]                                # (B*T,)
+        total_nats = total_nats + (loss_1d * (num_bytes > 0)).sum()
+        total_bytes = total_bytes + num_bytes.sum()
+        mx.eval(total_nats, total_bytes)  # flush graph every step — MLX is lazy, accumulating without eval causes OOM
+    nats = total_nats.item()
+    byt = total_bytes.item()
+    if byt == 0:
+        return float("inf")
+    return nats / (math.log(2) * byt)
+
+
 @torch.no_grad()
 def evaluate_bpb(model: object, batches: object, steps: int, token_bytes: torch.Tensor) -> float:
     """

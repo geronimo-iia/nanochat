@@ -6,7 +6,7 @@ read_when:
   - Deciding what to implement next
   - Understanding scope and sequencing
 status: active
-last_updated: "2025-07-10"
+last_updated: "2025-07-11"
 ---
 
 # nanochat Roadmap
@@ -23,7 +23,8 @@ last_updated: "2025-07-10"
 | Phase 2 — Codebase Refactor | 2025-07-15 | Config manager, workspace, scheduler co-location, entry point sub-packages, CLI cleanup |
 | Phase 2.1 — Checkpoint Manager | 2025-07-19 | `CheckpointManager` protocol, typed metadata, `model_factory.py`, `CheckpointConfig` |
 | Phase 2.2 — Dual Trainer / MLX Backend | 2025-07-24 | `BaseTrainer` protocol, `TorchTrainer`, `MLXTrainer`, backend-agnostic `loop.py`, safetensors checkpoint interop, `--backend=mlx` autodetect, MLX device sync / memory / cache (`hardware.py`), `mx.compile` on forward-backward (`_LossAndGrad`), dtype handling, resume correctness — see [mlx-backend.md](mlx-backend.md) |
-| Phase 2.3 — MLX Base Training Correctness | TBD | Phase 6 analysis fixes: CPU loader for MLX path, dead `model` param removed, SFT mfu guard — see [mlx-analysis-phase6.md](mlx-analysis-phase6.md). First MLX vs MPS performance comparison: [mlx-performance.md](mlx-performance.md) |
+| Phase 2.3 — MLX Base Training Correctness | 2025-07-11 | Phase 6 analysis fixes: CPU loader for MLX path, dead `model` param removed, SFT mfu guard — see [mlx-analysis-phase6.md](mlx-analysis-phase6.md). First MLX vs MPS performance comparison: [mlx-performance.md](mlx-performance.md) |
+| Phase 2.4 — MLX Dataloader Cleanup | 2025-07-11 | Removed redundant `gpu_buffer` copy on CPU/MLX path, renamed `_torch_loader` → `_loader` in `MLXTrainer`. Codebase ready for `MLXDataLoader` (Option C) — see [mlx-dataloader-analysis.md](mlx-dataloader-analysis.md) |
 
 ## Active — Phase 1.5: Compression-Based Optimization
 
@@ -59,13 +60,27 @@ Sequencing depends on the Phase 1.5 outcome.
 | Phase 5 — Capabilities | Long context, tool use, multimodal | [plan](phase-5-tools-transparency.md) |
 | Phase 6 — SP-Transformer Hybrid | Combine transformer efficiency with SP Theory | [plan](phase-6-hybrid-architecture.md) |
 
+## Dev Notes
+
+### Tokenizer quality
+
+Current tokenizer: 32k vocab, trained on 50M characters (`max_chars = 50000000` in
+`config.toml`). The config comment says "use 2000000000 for production" — that limit
+was never raised.
+
+BPE merge quality stabilizes around 1–10B chars. At 50M the merges are suboptimal,
+which slightly inflates compression ratios and token counts. Vocab size (32k) is fine.
+
+**Action**: retrain with `max_chars = 2000000000` before any serious production run.
+Do not retrain mid-experiment — it invalidates cross-run comparisons.
+
 ## Deferred
 
 - **`--resume-from-latest` flag** — auto-detect the last saved checkpoint step so you don't have to look it up manually. Uses `find_last_step()` which already exists in `checkpoint/discovery.py`.
 
 - **MLX evaluation engine** — KV cache not implemented in `mlx_gpt.py`. Required for `nanochat eval` and `nanochat serve` on the MLX path. No design doc needed until this work starts.
 
-- **MLX SFT / RL** — `MLXTrainer` covers base pretraining only. SFT and RL loops remain PyTorch-only. Foundational fix (CPU loader for MLX path) tracked in [mlx-analysis-phase6.md](mlx-analysis-phase6.md).
+- **MLX SFT / RL** — `MLXTrainer` covers base pretraining only. SFT and RL loops remain PyTorch-only. The CPU loader foundational fix is done (Phase 2.3/2.4). Remaining blocker: KV cache not implemented in `mlx_gpt.py`.
 
 - **Safetensors optimizer state** — optimizer state is currently saved with `torch.save` even in `SafetensorsCheckpointManager`. A future improvement would split into tensor buffers (`.safetensors`) and scalar metadata (JSON) to remove the torch dependency entirely. See note in [checkpoint-interop.md](checkpoint-interop.md).
 

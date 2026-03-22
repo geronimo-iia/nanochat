@@ -3,14 +3,14 @@ title: "Phase 1.5.1 Validation Checklist"
 summary: "Step-by-step checklist for running compression metrics validation experiments."
 read_when: "Ready to validate compression metrics with actual training runs."
 status: active
-last_updated: "2026-03-17"
+last_updated: "2025-07-11"
 ---
 
 # Phase 1.5.1 Validation Checklist
 
 **Implementation**: ✅ `CompressionMetrics` class + training loop integration complete  
 **Pipeline smoke test**: ✅ base train → SFT → chat validated end-to-end on MPS (Apple Silicon M3 Max)  
-**Hardware**: MPS only (no multi-GPU) — Experiments 3–4 use single-process with reduced batch size  
+**Hardware**: MLX only (Apple Silicon M3 Max) — d6 only for initial validation  
 **Next step**: Run Experiment 1 (smoke test), then proceed in order.
 
 ## Pre-Flight
@@ -18,17 +18,16 @@ last_updated: "2026-03-17"
 ### 1. Environment
 
 ```bash
-uv run python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('MPS:', torch.backends.mps.is_available())"
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+uv run python -c "import mlx.core as mx; print('MLX:', mx.default_device())"
 ```
-
-- CUDA → run all experiments with `torchrun` for multi-GPU
-- MPS → all experiments supported, single-process only, use reduced `--device-batch-size`
-- Neither → cannot run validation
 
 ### 2. Data
 
 ```bash
-uv run nanochat --base-dir $NANOCHAT_BASE_DIR data download -n 8    # minimum for d12 smoke test
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    data download -n 8    # minimum for d6 validation
 ```
 
 See [data-layout.md](data-layout.md) for where shards are stored.
@@ -36,98 +35,60 @@ See [data-layout.md](data-layout.md) for where shards are stored.
 ### 3. Tokenizer
 
 ```bash
-uv run nanochat --base-dir $NANOCHAT_BASE_DIR data tokenizer train
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    data tokenizer train
 ```
 
 ### 4. Code
 
 ```bash
-uv run python -c "from nanochat.compression_metrics import CompressionMetrics; print('OK')"
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+uv run python -c "from nanochat.training.compression_metrics import CompressionMetrics; print('OK')"
 uv run pytest tests/ -q
-# Expected: 165 passed, 10 skipped (FA3 tests skipped on MPS/CPU)
+# Expected: 323 passed, 10 skipped (FA3 tests skipped on CPU)
 ```
 
 ## Experiments
 
-Run in order. Each builds confidence before committing more compute.
-
-### Experiment 1 — Smoke Test (d8, ~17 min on MPS / ~5 min on GPU)
+### Experiment 1 — Smoke Test (d6, ~3 min on MLX)
 
 Verify compression tracking works end-to-end without errors.
 
 ```bash
-uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
-    --depth=8 \
-    --num-iterations=100 \
-    --track-compression \
-    --compression-log-every=10 \
-    --eval-every=50 \
-    --core-metric-every=-1 \
-    --sample-every=-1 \
-    --save-every=-1 \
-    --run=compression-smoke-d8
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx --wandb=local --run=compression-smoke-d6 \
+    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=64 --total-batch-size=524288 \
+    --num-iterations=20 \
+    --track-compression --compression-log-every=5 \
+    --eval-every=0 --core-metric-every=0 --sample-every=0 --save-every=-1
 ```
 
-- [ ] No errors
-- [ ] `[compression]` lines appear in console every 10 steps
-- [ ] MFU similar to baseline run at same depth
+- [x] No errors
+- [x] `[compression]` lines appear in console every 5 steps
+- [x] MFU consistent with baseline (~44-46k tok/sec)
+- [x] `compression/compression_ratio` logged to wandb
 
-### Experiment 2 — Short Validation (d12, ~6h on MPS / ~1–2h on GPU)
+### Experiment 2 — Short Validation (d6, ~5h on MLX)
 
 Collect enough data points to analyze correlation.
 
 ```bash
-uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
-    --depth=12 \
-    --track-compression \
-    --compression-log-every=50 \
-    --eval-every=250 \
-    --core-metric-every=-1 \
-    --sample-every=-1 \
-    --save-every=-1 \
-    --run=compression-validation-d12
+cd /Users/geronimo/build/sp_theory/forge/nanochat
+uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/config.toml \
+    --backend=mlx --wandb=local --run=compression-validation-d6 \
+    train base --depth=6 --aspect-ratio=64 --head-dim=128 --max-seq-len=1024 \
+    --device-batch-size=64 --total-batch-size=524288 \
+    --track-compression --compression-log-every=50 \
+    --eval-every=250 --core-metric-every=0 --sample-every=0 --save-every=-1
 ```
 
 - [ ] Completes without error
-- [ ] Multiple val checkpoints logged (every 250 steps)
-- [ ] Can plot `compression_ratio` vs `val_bpb` over time
-
-### Experiment 3 — Medium Scale (d16, ~12–18h on MPS / ~2h on GPU)
-
-Validate correlation holds at larger scale.
-
-```bash
-uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
-    --depth=16 \
-    --device-batch-size=8 \
-    --track-compression \
-    --compression-log-every=100 \
-    --eval-every=500 \
-    --core-metric-every=-1 \
-    --sample-every=-1 \
-    --save-every=-1 \
-    --run=compression-validation-d16
-```
-
-- [ ] Completes without error
-- [ ] Correlation pattern consistent with Experiment 2
-
-### Experiment 4 — Full Scale (d24, ~48h+ on MPS / ~8–12h on GPU)
-
-Final validation at production scale. On MPS this is a long run — consider running overnight in a `screen` session.
-
-```bash
-uv run nanochat --base-dir $NANOCHAT_BASE_DIR --wandb=local train base \
-    --depth=24 \
-    --device-batch-size=4 \
-    --track-compression \
-    --compression-log-every=100 \
-    --eval-every=500 \
-    --run=compression-validation-d24
-```
-
-- [ ] Completes without error
-- [ ] Correlation holds at scale
+- [ ] `val/bpb` logged every 250 steps
+- [ ] `compression/compression_ratio` logged every 50 steps
+- [ ] Can plot `compression_ratio` vs `val/bpb` at steps that are multiples of 250
 
 ## Analysis
 

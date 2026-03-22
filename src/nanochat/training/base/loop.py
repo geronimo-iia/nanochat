@@ -8,7 +8,7 @@ from nanochat.common import print0
 from nanochat.common.hardware import clear_device_cache
 from nanochat.evaluation.core_benchmark import evaluate_core
 from nanochat.evaluation.engine import Engine
-from nanochat.evaluation.loss_eval import evaluate_bpb
+from nanochat.evaluation.loss_eval import evaluate_bpb, evaluate_bpb_mlx
 from nanochat.report import get_report
 from nanochat.training.base.setup import BaseTrainingSetup
 from nanochat.training.compression_metrics import CompressionMetrics
@@ -37,7 +37,10 @@ def train_loop(s: BaseTrainingSetup, checkpoint_manager: CheckpointManager) -> N
                 s.config.training.device_batch_size * s.config.training.max_seq_len * s.ddp_world_size
             )
             with s.trainer.eval_context() as model:
-                state.val_bpb = evaluate_bpb(model, val_loader, eval_steps, s.token_bytes)
+                if s.device_type == "mlx":
+                    state.val_bpb = evaluate_bpb_mlx(model, val_loader, eval_steps, s.token_bytes)
+                else:
+                    state.val_bpb = evaluate_bpb(model, val_loader, eval_steps, s.token_bytes)
             print0(f"Step {state.step:05d} | Validation bpb: {state.val_bpb:.6f}")
             if state.val_bpb < state.min_val_bpb:
                 state.min_val_bpb = state.val_bpb
