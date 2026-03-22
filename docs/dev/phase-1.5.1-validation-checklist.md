@@ -3,7 +3,7 @@ title: "Phase 1.5.1 Validation Checklist"
 summary: "Step-by-step checklist for running compression metrics validation experiments."
 read_when: "Ready to validate compression metrics with actual training runs."
 status: active
-last_updated: "2025-07-11"
+last_updated: "2025-07-25"
 ---
 
 # Phase 1.5.1 Validation Checklist
@@ -110,9 +110,34 @@ Verify safetensors save and resume work end-to-end with MLX backend before Exper
 bash runs/exp1b-safetensors-smoke.sh
 ```
 
-- [ ] Checkpoint saved at step 5 as `.safetensors`
-- [ ] Resume from step 5 completes without error
-- [ ] Loss at step 6 after resume matches loss before save
+- [x] Checkpoint saved at step 5 as `.safetensors`
+- [x] Resume from step 5 completes without error
+- [x] Loss at step 6 after resume matches loss before save
+
+### Observations
+
+Two bugs fixed during this experiment:
+
+1. `convert.py` `to_numpy` — `np.array()` on an MLX bfloat16 array raises `RuntimeError`
+   (numpy has no bfloat16, PEP 3118 format string `B` item size mismatch). Fixed by upcasting
+   bfloat16 → float32 before `np.array()`.
+2. `mlx_trainer.py` `load_state_dicts` — `model.update()` does not auto-cast, so float32
+   arrays loaded from safetensors would silently replace bfloat16 model weights. Fixed by
+   restoring each parameter to the model's existing dtype after `from_numpy_mlx`.
+
+Resume validation from log (`exp1b.log`):
+
+| | Phase 1 (fresh) | Phase 2 (resumed from step 5) |
+|---|---|---|
+| step 5 loss | 10.500000 | 10.339935 |
+| step 6 loss | 10.500000 | 10.226856 |
+| rg at step 5 | 8 | 10 (matches phase 1 step 7) |
+| Peak memory | 28355 MiB | 28595 MiB |
+
+- `Resuming optimization from step 5` confirmed in log
+- Loss at step 5 after resume (`10.34`) is lower than fresh step 5 (`10.50`) — trained weights loaded correctly
+- `rg` (dataloader shard position) correctly restored — dataloader state resumed
+- Loss continues declining steps 6–9 (`10.22 → 10.14 → 10.07 → 10.02`) — optimizer momentum restored
 
 ### Experiment 2 — Short Validation (d6, ~5h on MLX)
 

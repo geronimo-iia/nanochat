@@ -15,7 +15,11 @@ def to_numpy(state_dict: dict[str, Any]) -> dict[str, np.ndarray]:
         elif isinstance(v, torch.Tensor):
             out[k] = v.detach().cpu().numpy()
         else:
-            # mlx array — np.array() triggers evaluation and copies to CPU
+            # mlx array — np.array() triggers evaluation and copies to CPU.
+            # numpy has no bfloat16; upcast to float32 first.
+            import mlx.core as mx
+            if hasattr(v, 'dtype') and v.dtype == mx.bfloat16:
+                v = v.astype(mx.float32)
             out[k] = np.array(v)
     return out
 

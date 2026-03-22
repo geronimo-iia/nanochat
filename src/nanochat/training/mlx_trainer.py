@@ -130,6 +130,10 @@ class MLXTrainer:
     def load_state_dicts(self, model_state: dict[str, Any], optimizer_state: dict[str, Any]) -> None:
         if any(isinstance(v, np.ndarray) for v in model_state.values()):
             model_state = from_numpy_mlx(model_state)
+        # Restore original dtypes — safetensors upcasts bfloat16 to float32 on save.
+        # model.update() does not auto-cast, so we must match the model's existing dtypes.
+        current_dtypes = {k: v.dtype for k, v in nn.utils.tree_flatten(self._orig_model.parameters())}
+        model_state = {k: v.astype(current_dtypes[k]) if k in current_dtypes else v for k, v in model_state.items()}
         self._orig_model.update(nn.utils.tree_unflatten(list(model_state.items())))
         mx.eval(self._orig_model.parameters())
 
