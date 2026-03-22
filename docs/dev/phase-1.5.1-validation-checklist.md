@@ -102,6 +102,18 @@ Run: M3 Max 128GB, d6, 20 steps, warmup only (`lrm` 0.03→0.50).
 
 Conclusion: pipeline is healthy. Experiment 2 needed for real correlation analysis.
 
+### Experiment 1b — Safetensors Checkpoint Smoke Test (d6, ~5 min on MLX)
+
+Verify safetensors save and resume work end-to-end with MLX backend before Experiment 2.
+
+```bash
+bash runs/exp1b-safetensors-smoke.sh
+```
+
+- [ ] Checkpoint saved at step 5 as `.safetensors`
+- [ ] Resume from step 5 completes without error
+- [ ] Loss at step 6 after resume matches loss before save
+
 ### Experiment 2 — Short Validation (d6, ~5h on MLX)
 
 **Status**: 🟡 Running — PID 24697, started 2025-07-25

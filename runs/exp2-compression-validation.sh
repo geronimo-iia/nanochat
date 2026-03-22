@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 
 echo "Starting Experiment 2 — log: $LOG_FILE"
 
-nohup uv run nanochat \
+PYTHONUNBUFFERED=1 nohup uv run nanochat \
     --config "$BASE_DIR/config.toml" \
     --backend=mlx \
     --wandb=local \
