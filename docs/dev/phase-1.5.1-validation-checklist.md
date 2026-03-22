@@ -53,7 +53,7 @@ uv run pytest tests/ -q
 
 ### Experiment 1 — Smoke Test (d6, ~3 min on MLX)
 
-Verify compression tracking works end-to-end without errors.
+Verify compression tracking and `val/bpb` evaluation work end-to-end without errors.
 
 ```bash
 cd /Users/geronimo/build/sp_theory/forge/nanochat
@@ -63,13 +63,18 @@ uv run nanochat --config /Users/geronimo/build/sp_theory/experiments/nanochat/co
     --device-batch-size=64 --total-batch-size=524288 \
     --num-iterations=20 \
     --track-compression --compression-log-every=5 \
-    --eval-every=0 --core-metric-every=0 --sample-every=0 --save-every=-1
+    --eval-every=10 --eval-tokens=524288 \
+    --core-metric-every=-1 --sample-every=-1
 ```
+
+`--eval-tokens=524288` = 8 eval steps at this batch size — enough to verify `evaluate_bpb_mlx`
+without OOM risk (default 41943040 = 640 steps would OOM before the fix).
 
 - [x] No errors
 - [x] `[compression]` lines appear in console every 5 steps
 - [x] MFU consistent with baseline (~44-46k tok/sec)
 - [x] `compression/compression_ratio` logged to wandb
+- [x] `val/bpb` logged at step 10 and 20 without OOM
 
 ### Experiment 2 — Short Validation (d6, ~5h on MLX)
 
