@@ -343,7 +343,7 @@ def _setup_mlx(
     """Build MLXTrainer."""
     from nanochat.models.mlx_gpt import GPT as MLXGPT
     from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
-    from nanochat.training.mlx_trainer import MLXTrainer
+    from nanochat.training.base.mlx_trainer import MLXTrainer
     from nanochat.common import get_mlx_compute_dtype
 
     mlx_compute_init()

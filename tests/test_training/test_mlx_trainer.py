@@ -12,7 +12,7 @@ import torch
 from nanochat.models.config import GPTConfig
 from nanochat.models.mlx_gpt import GPT
 from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
-from nanochat.training.mlx_trainer import MLXTrainer
+from nanochat.training.base.mlx_trainer import MLXTrainer
 
 CONFIG = GPTConfig(
     sequence_len=16,
@@ -252,7 +252,7 @@ def test_lazy_accum_matches_eager():
     deferring mx.eval to after all N compiled calls produces numerically equivalent
     accumulated gradients (max_diff < 1e-3 across all parameters).
     """
-    from nanochat.training.mlx_trainer import _LossAndGrad
+    from nanochat.training.base.mlx_trainer import _LossAndGrad
 
     N = 2
     rng = np.random.default_rng(42)

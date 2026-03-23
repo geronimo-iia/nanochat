@@ -23,7 +23,7 @@ and optimizer step differ.
 graph TD
     CLI["nanochat train base\n--backend=mlx"]
     Setup["setup.py\n_setup_mlx()"]
-    Trainer["MLXTrainer\ntraining/mlx_trainer.py"]
+    Trainer["MLXTrainer\ntraining/base/mlx_trainer.py"]
     Model["mlx_gpt.GPT\nmodels/mlx_gpt.py"]
     Opt["MuonAdamW\ntraining/mlx_optimizer.py"]
     Loop["loop.py\n(backend-agnostic)"]

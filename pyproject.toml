@@ -28,6 +28,7 @@ dependencies = [
     "wandb>=0.21.3",
     "zstandard>=0.25.0",
     "mlx>=0.26.0; sys_platform == 'darwin'",
+    "mlx>=0.31.1",
 ]
 
 [project.scripts]

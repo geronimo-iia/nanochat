@@ -118,7 +118,7 @@ Training loops and supporting infrastructure.
 | `rl/`                    | GRPO reinforcement learning — `RLState`, rollout, eval, loop         |
 | `optimizer.py`           | `MuonAdamW` and `DistMuonAdamW` — PyTorch optimizers                 |
 | `mlx_optimizer.py`       | `MuonAdamW` — MLX optimizer, see [mlx-muon-design.md](mlx-muon-design.md) |
-| `mlx_trainer.py`         | `MLXTrainer` — `BaseTrainer` implementation for Apple Silicon        |
+| `base/mlx_trainer.py`    | `MLXTrainer` — `BaseTrainer` implementation for Apple Silicon        |
 | `scaling.py`             | Scaling law utilities (compute-optimal step count, total batch size) |
 | `dataloader.py`          | Distributed token dataloader over ClimbMix shards                    |
 | `compression_math.py`    | Pure numpy compression functions — backend-agnostic                  |
@@ -204,7 +204,7 @@ Engine(model, tokenizer, device)
 - `dataset/` imports from `common/`, `workspace`
 - `model_factory.py` imports from `checkpoint/`, `config/`, `models/`, `tokenizer/`, `workspace`
 - `training/base/`, `training/sft/`, `training/rl/` import from `common/`, `workspace`, `checkpoint/`, `model_factory`, `models/`, `tokenizer/`, `dataset/`, `tasks/`, `evaluation/`
-- `training/mlx_trainer.py` additionally imports from `mlx` (Darwin only)
+- `training/base/mlx_trainer.py` additionally imports from `mlx` (Darwin only)
 - `evaluation/base/`, `evaluation/chat/` import from `common/`, `workspace`, `model_factory`, `models/`, `tokenizer/`, `tasks/`
 - `chat/` imports from `common/`, `config/`, `model_factory`, `evaluation/`, `tokenizer/`
 - `cli.py` imports from all packages (top-level wiring only)
