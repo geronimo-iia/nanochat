@@ -43,6 +43,35 @@ def causal_window_mask(T: int, window: int) -> mx.array:
 
 
 # ---------------------------------------------------------------------------
+# KV-cache for autoregressive generation
+# ---------------------------------------------------------------------------
+
+
+class MLXKVCache:
+    """Per-layer KV-cache for MLX autoregressive generation.
+
+    Keys and values are stored as a list of (k, v) tuples, one per layer.
+    Each tuple is (k: [B, n_kv_head, pos, head_dim], v: same shape).
+    `pos` grows by concatenation on each decode step — MLX has no in-place updates.
+    Call mx.eval after each decode step to prevent unbounded lazy graph accumulation.
+    """
+
+    def __init__(self, layer_kvs: list[tuple[mx.array, mx.array]]) -> None:
+        self.layer_kvs = layer_kvs  # list[tuple[k, v]] per layer
+
+    @property
+    def pos(self) -> int:
+        """Current sequence position (length of cached K)."""
+        if not self.layer_kvs:
+            return 0
+        return int(self.layer_kvs[0][0].shape[2])
+
+    @classmethod
+    def empty(cls) -> "MLXKVCache":
+        return cls([])
+
+
+# ---------------------------------------------------------------------------
 # Sub-modules
 # ---------------------------------------------------------------------------
 
@@ -114,6 +143,44 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(0, 2, 1, 3).reshape(B, T, -1)
         return self.c_proj(y)
 
+    def forward_cached(
+        self,
+        x: mx.array,   # [B, T, C]
+        ve: Optional[mx.array],
+        cos: mx.array,
+        sin: mx.array,
+        mask,          # causal mask for prefill, None for single-token decode
+        past_kv: Optional[tuple[mx.array, mx.array]] = None,
+    ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
+        """Attention with KV-cache support. Returns (output, (new_k, new_v))."""
+        B, T, _ = x.shape
+
+        q = self.c_q(x).reshape(B, T, self.n_head, self.head_dim).transpose(0, 2, 1, 3)
+        k = self.c_k(x).reshape(B, T, self.n_kv_head, self.head_dim).transpose(0, 2, 1, 3)
+        v = self.c_v(x).reshape(B, T, self.n_kv_head, self.head_dim).transpose(0, 2, 1, 3)
+
+        if ve is not None:
+            assert self.ve_gate is not None
+            ve = ve.reshape(B, T, self.n_kv_head, self.head_dim).transpose(0, 2, 1, 3)
+            gate = 3 * mx.sigmoid(self.ve_gate(x[..., : self.VE_GATE_CHANNELS]))
+            gate = gate.transpose(0, 2, 1)[..., None]
+            v = v + gate * ve
+
+        q = apply_rotary_emb(q, cos, sin)
+        k = apply_rotary_emb(k, cos, sin)
+        q = norm(q) * 1.2
+        k = norm(k) * 1.2
+
+        # Concatenate past KV with current KV
+        if past_kv is not None:
+            past_k, past_v = past_kv
+            k = mx.concatenate([past_k, k], axis=2)
+            v = mx.concatenate([past_v, v], axis=2)
+
+        y = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.head_dim**-0.5, mask=mask)
+        y = y.transpose(0, 2, 1, 3).reshape(B, T, -1)
+        return self.c_proj(y), (k, v)
+
 
 class Block(nn.Module):
     def __init__(self, config: GPTConfig, layer_idx: int) -> None:
@@ -132,6 +199,20 @@ class Block(nn.Module):
         x = x + self.attn(norm(x), ve, cos, sin, mask)
         x = x + self.mlp(norm(x))
         return x
+
+    def forward_cached(
+        self,
+        x: mx.array,
+        ve: Optional[mx.array],
+        cos: mx.array,
+        sin: mx.array,
+        mask,
+        past_kv: Optional[tuple[mx.array, mx.array]] = None,
+    ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
+        attn_out, new_kv = self.attn.forward_cached(norm(x), ve, cos, sin, mask, past_kv)
+        x = x + attn_out
+        x = x + self.mlp(norm(x))
+        return x, new_kv
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +302,8 @@ class GPT(nn.Module):
     def __call__(
         self,
         idx: mx.array,  # [B, T] int32
-        targets: Optional[mx.array] = None,  # [B, T] int32 or None
+        targets: Optional[mx.array] = None,  # [B, T] int32 or None; -1 = masked
+        loss_reduction: str = "mean",  # "mean" → scalar; "none" → (B, T) per-token CE
     ) -> mx.array:
         B, T = idx.shape
 
@@ -260,5 +342,83 @@ class GPT(nn.Module):
         if targets is None:
             return logits
 
-        loss = mx.mean(nn.losses.cross_entropy(logits.reshape(-1, self.config.vocab_size), targets.reshape(-1)))
-        return loss
+        # Masked CE: positions with target == -1 are padding or non-assistant tokens.
+        # clip(0) avoids out-of-bounds index; mask zeros their contribution.
+        flat_targets = targets.reshape(-1)
+        flat_logits = logits.reshape(-1, self.config.vocab_size)
+        mask = (flat_targets >= 0).astype(mx.float32)
+        ce = nn.losses.cross_entropy(flat_logits, mx.maximum(flat_targets, 0))
+
+        if loss_reduction == "none":
+            # Return per-token CE, zeroed at masked positions, shape (B, T).
+            # In RL: logp = -model(inputs, targets, loss_reduction="none")
+            return (ce * mask).reshape(idx.shape)
+
+        # Default: masked mean (backward-compatible with base pretraining — all
+        # base targets are >= 0, so mask is all-ones and result equals mx.mean).
+        return mx.sum(ce * mask) / mx.maximum(mask.sum(), mx.array(1.0))
+
+    def forward_with_kv_cache(
+        self,
+        idx: mx.array,           # [B, T] int32
+        kv_cache: Optional["MLXKVCache"] = None,
+    ) -> tuple[mx.array, "MLXKVCache"]:
+        """Forward pass with KV-cache for autoregressive generation.
+
+        When kv_cache is None (prefill): runs full forward pass over the prompt,
+        builds and returns a new MLXKVCache.
+
+        When kv_cache is provided (decode): runs single-token forward pass
+        (T=1), appends to the cache, returns updated cache.
+
+        Returns (logits, new_kv_cache). Logits shape: [B, T, vocab_size].
+        """
+        B, T = idx.shape
+        pos = kv_cache.pos if kv_cache is not None else 0
+
+        cos = self.cos[:, :, pos:pos + T, :]
+        sin = self.sin[:, :, pos:pos + T, :]
+
+        x = self.wte(idx)
+        x = norm(x)
+
+        # Smear gate — only meaningful when T > 1 (prefill); no-op for T=1.
+        if T > 1:
+            gate = self.smear_lambda * mx.sigmoid(self.smear_gate(x[:, 1:, : self.SMEAR_GATE_CHANNELS]))
+            x = mx.concatenate([x[:, :1], x[:, 1:] + gate * x[:, :-1]], axis=1)
+
+        x0 = x
+        backout_layer = self.config.n_layer // 2
+        x_backout = None
+
+        new_layer_kvs: list[tuple[mx.array, mx.array]] = []
+        for i, block in enumerate(self.blocks):
+            x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
+            ve = self.value_embeds[_ve_key(i)](idx) if has_ve(i, self.config.n_layer) else None
+
+            if kv_cache is None:
+                # Prefill: use the same causal/window masks as training
+                mask = self._masks[i] if T == self.config.sequence_len else (
+                    "causal" if self.window_sizes[i][0] == self.config.sequence_len
+                    else causal_window_mask(T, self.window_sizes[i][0])
+                )
+                past_kv = None
+            else:
+                # Decode: attend to all past tokens — no causal mask needed
+                mask = None
+                past_kv = kv_cache.layer_kvs[i]
+
+            x, new_kv = block.forward_cached(x, ve, cos, sin, mask, past_kv)
+            new_layer_kvs.append(new_kv)
+
+            if i == backout_layer:
+                x_backout = x
+
+        if x_backout is not None:
+            x = x - self.backout_lambda * x_backout
+        x = norm(x)
+
+        logits = self.lm_head(x)[..., : self.config.vocab_size]
+        logits = self.SOFTCAP * mx.tanh(logits / self.SOFTCAP)
+
+        return logits, MLXKVCache(new_layer_kvs)

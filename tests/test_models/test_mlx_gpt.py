@@ -189,6 +189,118 @@ def test_numeric_match_pytorch():
     assert max_diff < 1e-3, f"Max logit diff {max_diff:.6f} exceeds 1e-3"
 
 
+# ---------------------------------------------------------------------------
+# S1: Masked CE (ignore_index=-1)
+# ---------------------------------------------------------------------------
+
+def test_masked_loss_ignores_minus_one():
+    """Positions with target == -1 must not affect the loss."""
+    model = MLXGPT(SMALL_CONFIG)
+    rng = np.random.default_rng(7)
+    idx = mx.array(rng.integers(0, 128, (2, 64)))
+
+    # All-valid targets
+    targets_full = mx.array(rng.integers(0, 128, (2, 64)))
+    loss_full = model(idx, targets_full)
+    mx.eval(loss_full)
+
+    # Same targets but with the second half masked (-1)
+    targets_np = np.array(targets_full)
+    targets_half = targets_np.copy()
+    targets_half[:, 32:] = -1
+    loss_half = model(idx, mx.array(targets_half))
+    mx.eval(loss_full, loss_half)
+
+    # The two losses should differ (masking changes the average)
+    assert float(loss_full) != float(loss_half)
+
+
+def test_all_masked_loss_stable():
+    """When all targets are -1 the loss must be 0 (not NaN or inf)."""
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.zeros((1, 64), dtype=np.int32))
+    targets = mx.array(np.full((1, 64), -1, dtype=np.int32))
+    loss = model(idx, targets)
+    mx.eval(loss)
+    val = float(loss)
+    assert val == 0.0, f"Expected 0.0, got {val}"
+
+
+def test_masked_loss_matches_unmasked_on_valid_positions():
+    """sum(ce * mask) / n_valid must equal mean(ce) when all targets are valid."""
+    model = MLXGPT(SMALL_CONFIG)
+    rng = np.random.default_rng(42)
+    idx = mx.array(rng.integers(0, 128, (1, 32)))
+    targets = mx.array(rng.integers(0, 128, (1, 32)))
+
+    # loss_reduction="mean" uses masked path; all targets >=0 so result = plain mean
+    masked_loss = model(idx, targets)
+    mx.eval(masked_loss)
+
+    # Verify it equals what the old code would have produced: mx.mean(ce)
+    import mlx.nn as nn_
+    logits = model(idx)
+    flat_ce = nn_.losses.cross_entropy(
+        logits.reshape(-1, SMALL_CONFIG.vocab_size), targets.reshape(-1)
+    )
+    plain_mean = mx.mean(flat_ce)
+    mx.eval(plain_mean)
+
+    assert abs(float(masked_loss) - float(plain_mean)) < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# R2: Per-token loss (loss_reduction="none")
+# ---------------------------------------------------------------------------
+
+def test_per_token_loss_shape():
+    model = MLXGPT(SMALL_CONFIG)
+    B, T = 2, 64
+    idx = mx.array(np.random.randint(0, 128, (B, T)))
+    targets = mx.array(np.random.randint(0, 128, (B, T)))
+    loss = model(idx, targets, loss_reduction="none")
+    mx.eval(loss)
+    assert loss.shape == (B, T)
+
+
+def test_per_token_loss_positive():
+    """All unmasked per-token CE values must be non-negative."""
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.random.randint(0, 128, (1, 32)))
+    targets = mx.array(np.random.randint(0, 128, (1, 32)))
+    loss = model(idx, targets, loss_reduction="none")
+    mx.eval(loss)
+    assert float(mx.min(loss).item()) >= 0.0
+
+
+def test_per_token_loss_masked_positions_zero():
+    """Positions with target == -1 must produce exactly 0 CE."""
+    model = MLXGPT(SMALL_CONFIG)
+    idx = mx.array(np.zeros((1, 32), dtype=np.int32))
+    targets_np = np.random.randint(0, 128, (1, 32))
+    targets_np[:, 16:] = -1  # mask second half
+    loss = model(idx, mx.array(targets_np), loss_reduction="none")
+    mx.eval(loss)
+    assert float(mx.max(mx.abs(loss[:, 16:])).item()) == 0.0, "masked positions must be zero"
+    assert float(mx.max(loss[:, :16]).item()) > 0.0, "unmasked positions must be positive"
+
+
+def test_per_token_loss_sum_matches_mean():
+    """sum(per_token) / n_valid == scalar mean loss."""
+    model = MLXGPT(SMALL_CONFIG)
+    rng = np.random.default_rng(0)
+    idx = mx.array(rng.integers(0, 128, (1, 32)))
+    targets = mx.array(rng.integers(0, 128, (1, 32)))
+
+    scalar = model(idx, targets, loss_reduction="mean")
+    tokens = model(idx, targets, loss_reduction="none")
+    mx.eval(scalar, tokens)
+
+    n_valid = 32  # all valid
+    reconstructed = float(mx.sum(tokens).item()) / n_valid
+    assert abs(float(scalar) - reconstructed) < 1e-5
+
+
 def test_numeric_match_pytorch_gqa():  # noqa: PLR0914
     """Numeric match with GQA (n_kv_head < n_head)."""
     config = GQA_CONFIG
