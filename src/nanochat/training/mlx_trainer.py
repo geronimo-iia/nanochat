@@ -140,19 +140,21 @@ class MLXTrainer:
         self._last_y = self._y
         self._nan_detected = False
 
-        # Chunked accumulation: _MultiStepLossAndGrad compiles chunk_size steps into one
-        # Metal program (chunk_size=2 by default). Each compiled call returns mean_loss and
-        # mean_grads over its chunk. mx.eval after each chunk prevents lazy nesting between
-        # chunks. For chunk_size=1 (odd grad_accum_steps), falls back to _LossAndGrad.
+        # Per-step eval of (loss, grads) — evaluates the compiled forward/backward once
+        # per accumulation step. Grads are materialized before being added to the
+        # accumulator, so the lazy accumulated_grads chain contains only cheap additions
+        # of materialized arrays (depth ≤ n_iters-1, all leaves already computed).
+        # This defers the cheap addition kernels to the optimizer step's mx.eval,
+        # batching them with the optimizer update in one Metal command buffer submission.
         #
-        # Gradient math: each chunk returns grads already divided by chunk_size. Dividing
-        # the final sum by n_chunks gives the mean over all grad_accum_steps microbatches:
-        #   sum(chunk_means) / n_chunks = (g1+...+gN) / (chunk_size × n_chunks) = mean(g)
+        # Do NOT eval accumulated_grads here — that would trigger n_iters extra Metal
+        # submissions for additions that are best deferred (they're free to defer since
+        # their leaves are already materialized, so no activation memory is held live).
         accumulated_grads = None
-        losses: list[mx.array] = []
+        train_loss = 0.0
         n_iters = self._grad_accum_steps // self._chunk_size
 
-        for _ in range(n_iters):
+        for i in range(n_iters):
             if self._chunk_size > 1:
                 # Collect chunk_size batches and stack for the fused compiled call.
                 chunk_xs, chunk_ys = [], []
@@ -165,12 +167,22 @@ class MLXTrainer:
                 loss, grads = self._loss_and_grad(self._x, self._y)
                 self._x, self._y, self._loader_state = self._next_batch()
 
-            losses.append(loss)
+            mx.eval(loss, grads)  # Materialize both outputs together — one Metal submission
+            train_loss = loss.item()
+
             accumulated_grads = (
                 grads if accumulated_grads is None
                 else nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
             )
-            mx.eval(accumulated_grads)  # materialize — prevents nesting between chunks
+
+            if not math.isfinite(train_loss):
+                key = _first_nan_key(grads)
+                print(
+                    f"[NaN] forward_backward chunk={i}/{n_iters} "
+                    f"(chunk_size={self._chunk_size}): loss={train_loss}  first_nan_grad={key}"
+                )
+                self._nan_detected = True
+                break
 
         assert accumulated_grads is not None
         if n_iters > 1:
@@ -179,20 +191,7 @@ class MLXTrainer:
             )
         else:
             self._accumulated_grads = accumulated_grads
-
-        mx.eval(losses, self._accumulated_grads)
-
-        train_loss = losses[-1].item()
-        for i, loss in enumerate(losses):
-            lv = loss.item()
-            if not math.isfinite(lv):
-                key = _first_nan_key(self._accumulated_grads)
-                print(
-                    f"[NaN] forward_backward chunk={i}/{n_iters} "
-                    f"(chunk_size={self._chunk_size}): loss={lv}  first_nan_grad={key}"
-                )
-                self._nan_detected = True
-                break
+        # accumulated_grads stays lazy here — cheap addition chain, evaluated in step()
 
         return StepResult(loss=train_loss, dataloader_state_dict=self._loader_state)
 

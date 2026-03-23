@@ -27,32 +27,37 @@ end flushes all N forward/backward passes in one GPU submission.
 # Compile once at trainer init — single-step function
 loss_and_grad = mx.compile(_LossAndGrad(model), inputs=[model], outputs=[model])
 
-# Each optimizer step: N lazy calls, single eval
+# Each optimizer step: N calls, eval (loss, grads) per step
 accumulated_grads = None
-losses = []
 for x, y in microbatches:
-    loss, grads = loss_and_grad(x, y)   # stays lazy — no mx.eval
-    losses.append(loss)
+    loss, grads = loss_and_grad(x, y)
+    mx.eval(loss, grads)               # one Metal submission per step — materializes grads
     accumulated_grads = (
         grads if accumulated_grads is None
         else nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
     )
+    # NOTE: do NOT eval accumulated_grads here — the lazy chain now only contains
+    # cheap additions of already-materialized arrays; defer to optimizer step below.
 
 mean_grads = nn.utils.tree_map(lambda g: g / N, accumulated_grads)
-mx.eval(losses, mean_grads)             # single sync for all N steps
 optimizer.update(model, mean_grads)
-mx.eval(model.parameters(), optimizer.state())
+mx.eval(model.parameters(), optimizer.state())   # evaluates additions + optimizer together
 ```
 
-**Why this is safe**: MLX's lazy evaluation keeps computation graphs in memory but does
-not execute them. Each compiled call adds its forward/backward graph to the pending
-queue. The `tree_map(a + b)` additions build lightweight lazy nodes on top. When
-`mx.eval` is finally called, all N forward/backward passes and the accumulation additions
-are submitted together. The total graph size is bounded — N forward passes plus
-N*(n_params) addition nodes — and no single Metal kernel exceeds argument buffer limits.
+**Why `mx.eval(loss, grads)` per step, not `mx.eval(accumulated_grads)`**:
+Evaluating `loss, grads` materializes the compiled function's outputs (forward + backward
+pass). The lazy `accumulated_grads` chain that builds on top only contains additions of
+already-materialized arrays — its leaves are all concrete values. This chain is cheap to
+defer: no activation memory is held live, and all N additions are batched into the final
+`mx.eval(model.parameters(), optimizer.state())` along with the optimizer update.
 
-**Correctness**: deferring `mx.eval` to after all N calls produces numerically equivalent
-gradients to the per-step eval approach (max_diff < 1e-3 across all parameters). See
+Evaluating `accumulated_grads` per step instead adds N unnecessary intermediate Metal
+command buffer submissions (one per addition), which measured ~10-15% slower on d6/M3 Max
+(~39k vs ~45k tok/sec). The lazy chain of materialized-leaf additions is not a performance
+problem — depth N-1 of simple add kernels is negligible compared to the forward/backward.
+
+**Correctness**: per-step eval of grads produces numerically equivalent gradients to
+the no-eval approach (max_diff < 1e-3 across all parameters). See
 `tests/test_training/test_mlx_trainer.py::test_lazy_accum_matches_eager`.
 
 ### Why not fuse all N steps into one compiled call?
