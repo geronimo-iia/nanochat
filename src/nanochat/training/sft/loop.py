@@ -8,7 +8,7 @@ from nanochat.checkpoint import make_checkpoint_manager
 from nanochat.common import is_ddp_initialized, print0
 from nanochat.evaluation.chat.loop import run_chat_eval
 from nanochat.evaluation.engine import Engine
-from nanochat.evaluation.loss_eval import evaluate_bpb
+from nanochat.evaluation.loss_eval import evaluate_bpb, evaluate_bpb_mlx
 from nanochat.report import get_report
 from nanochat.training.sft.setup import SFTTrainingSetup
 
@@ -16,7 +16,9 @@ from nanochat.training.sft.setup import SFTTrainingSetup
 def sft_train_loop(s: SFTTrainingSetup) -> None:
     """Run the SFT training loop. Mutates s.state in place."""
     checkpoint_manager = make_checkpoint_manager(s.ckpt_dir, s.config.checkpoint)
-    x, y = next(s.train_loader)  # type: ignore[call-overload]
+    # MLX trainer owns its loader and primes it in __init__; skip here.
+    if s.trainer is None:
+        x, y = next(s.train_loader)  # type: ignore[call-overload]
 
     while True:
         state = s.state
@@ -30,12 +32,18 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
 
         # Validation bpb
         if state.last_step or (s.config.sft.eval_every > 0 and state.step % s.config.sft.eval_every == 0):
-            s.model.eval()  # type: ignore[union-attr]
             val_loader = s.build_val_loader()
             eval_steps = s.config.sft.eval_tokens // (
                 s.config.sft.device_batch_size * s.config.sft.max_seq_len * s.ddp_world_size
             )
-            state.val_bpb = evaluate_bpb(s.model, val_loader, eval_steps, s.token_bytes)
+            if s.trainer is not None:
+                # MLX path: use eval_context to switch model to eval mode
+                with s.trainer.eval_context() as model:  # type: ignore[union-attr]
+                    state.val_bpb = evaluate_bpb_mlx(model, val_loader, eval_steps, s.token_bytes)
+            else:
+                s.model.eval()  # type: ignore[union-attr]
+                state.val_bpb = evaluate_bpb(s.model, val_loader, eval_steps, s.token_bytes)
+                s.model.train()  # type: ignore[union-attr]
             print0(f"Step {state.step:05d} | Validation bpb: {state.val_bpb:.4f}")
             if state.val_bpb < state.min_val_bpb:
                 state.min_val_bpb = state.val_bpb
@@ -47,10 +55,9 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
                 },
                 step=state.step,
             )
-            s.model.train()  # type: ignore[union-attr]
 
-        # ChatCORE metric
-        if s.config.sft.chatcore_every > 0 and (
+        # ChatCORE metric (PyTorch only — requires Engine with KV-cache; MLXEngine not yet implemented)
+        if s.trainer is None and s.config.sft.chatcore_every > 0 and (
             state.last_step or (state.step > 0 and state.step % s.config.sft.chatcore_every == 0)
         ):
             s.model.eval()  # type: ignore[union-attr]
@@ -105,12 +112,21 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
 
         # Checkpoint — SFT only saves at last_step
         if state.last_step:
-            checkpoint_manager.save(
-                state,
-                s.orig_model.state_dict(),  # type: ignore[union-attr]
-                s.optimizer.state_dict(),  # type: ignore[union-attr]
-                rank=s.ddp_rank,
-            )
+            if s.trainer is not None:
+                # MLX path — state dicts from trainer
+                checkpoint_manager.save(
+                    state,
+                    s.trainer.model_state_dict(),  # type: ignore[union-attr]
+                    s.trainer.optimizer_state_dict(),  # type: ignore[union-attr]
+                    rank=0,
+                )
+            else:
+                checkpoint_manager.save(
+                    state,
+                    s.orig_model.state_dict(),  # type: ignore[union-attr]
+                    s.optimizer.state_dict(),  # type: ignore[union-attr]
+                    rank=s.ddp_rank,
+                )
 
         if state.last_step:
             break
@@ -121,34 +137,47 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
         # Training step
         s.synchronize()
         t0 = time.time()
-        train_loss = torch.zeros(1, device=s.device)
-        for _ in range(s.grad_accum_steps):
-            loss = s.model(x, y)  # type: ignore[operator]
-            train_loss = loss.detach()
-            loss = loss / s.grad_accum_steps
-            if s.scaler is not None:
-                s.scaler.scale(loss).backward()
-            else:
-                loss.backward()
-            x, y = next(s.train_loader)  # type: ignore[call-overload]
-            state.progress = max(state.progress, state.approx_progress)
 
-        lrm = s.get_lr_multiplier(state.progress)
-        muon_momentum = s.get_muon_momentum(state.step)
-        for group in s.optimizer.param_groups:  # type: ignore[union-attr]
-            group["lr"] = group["initial_lr"] * lrm
-            if group["kind"] == "muon":
-                group["momentum"] = muon_momentum
-        if s.scaler is not None:
-            s.scaler.unscale_(s.optimizer)
-            if is_ddp_initialized():
-                for v in s.scaler._found_inf_per_device(s.optimizer).values():  # type: ignore[arg-type]
-                    dist.all_reduce(v, op=dist.ReduceOp.MAX)
-            s.scaler.step(s.optimizer)
-            s.scaler.update()
+        if s.trainer is not None:
+            # MLX path — BaseTrainer handles accumulation, optimizer, and data loading internally
+            result = s.trainer.forward_backward()  # type: ignore[union-attr]
+            train_loss_val = result.loss
+            state.progress = max(state.progress, state.approx_progress)
+            lrm = s.get_lr_multiplier(state.progress)
+            muon_momentum = s.get_muon_momentum(state.step)
+            s.trainer.step(lrm, muon_momentum, weight_decay=0.0)  # type: ignore[union-attr]
         else:
-            s.optimizer.step()  # type: ignore[union-attr]
-        s.model.zero_grad(set_to_none=True)  # type: ignore[union-attr]
+            # PyTorch path — unchanged
+            train_loss = torch.zeros(1, device=s.device)
+            for _ in range(s.grad_accum_steps):
+                loss = s.model(x, y)  # type: ignore[operator]
+                train_loss = loss.detach()
+                loss = loss / s.grad_accum_steps
+                if s.scaler is not None:
+                    s.scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+                x, y = next(s.train_loader)  # type: ignore[call-overload]
+                state.progress = max(state.progress, state.approx_progress)
+
+            lrm = s.get_lr_multiplier(state.progress)
+            muon_momentum = s.get_muon_momentum(state.step)
+            for group in s.optimizer.param_groups:  # type: ignore[union-attr]
+                group["lr"] = group["initial_lr"] * lrm
+                if group["kind"] == "muon":
+                    group["momentum"] = muon_momentum
+            if s.scaler is not None:
+                s.scaler.unscale_(s.optimizer)
+                if is_ddp_initialized():
+                    for v in s.scaler._found_inf_per_device(s.optimizer).values():  # type: ignore[arg-type]
+                        dist.all_reduce(v, op=dist.ReduceOp.MAX)
+                s.scaler.step(s.optimizer)
+                s.scaler.update()
+            else:
+                s.optimizer.step()  # type: ignore[union-attr]
+            s.model.zero_grad(set_to_none=True)  # type: ignore[union-attr]
+            train_loss_val = train_loss.item()
+
         s.synchronize()
         dt = time.time() - t0
 
@@ -156,7 +185,7 @@ def sft_train_loop(s: SFTTrainingSetup) -> None:
 
         # Logging
         ema_beta = 0.9
-        state.smooth_train_loss = ema_beta * state.smooth_train_loss + (1 - ema_beta) * train_loss.item()
+        state.smooth_train_loss = ema_beta * state.smooth_train_loss + (1 - ema_beta) * train_loss_val
         debiased_smooth_loss = state.smooth_train_loss / (1 - ema_beta ** (state.step + 1))
         pct_done = 100 * state.progress
         tok_per_sec = int(s.config.sft.total_batch_size / dt)
