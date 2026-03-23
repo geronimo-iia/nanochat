@@ -57,8 +57,9 @@ def muon_step(
     momentum_buffer = _lerp(momentum_buffer, stacked_grads, 1 - momentum)
     g = _lerp(stacked_grads, momentum_buffer, momentum)
 
-    # Polar Express orthogonalization
-    x = g.astype(mx.bfloat16)
+    # Polar Express orthogonalization — run in float32; bfloat16 lacks precision
+    # for the large coefficients (a≈8, b≈-22, c≈15) and causes NaN after ~25 steps.
+    x = g.astype(mx.float32)
     x = x / (mx.linalg.norm(x, axis=(-2, -1), keepdims=True) * 1.01 + 1e-6)
     if g.shape[-2] > g.shape[-1]:  # tall matrix
         for a, b, c in _POLAR_EXPRESS_COEFFS[:ns_steps]:

@@ -3,7 +3,7 @@ title: "Experiment 2 — Compression Validation Results"
 summary: "Raw data and observations from the d6 compression validation run."
 read_when: "Analyzing compression metric correlation with val/bpb."
 status: active
-last_updated: "2026-03-22"
+last_updated: "2026-03-23"
 ---
 
 # Experiment 2 — Compression Validation Results
@@ -172,173 +172,107 @@ correlate against. Next experiment should set `compression-log-every` to a divis
 `eval-every` (e.g. `compression-log-every=250`), or increase total iterations to get more
 `x*250` eval points.
 
-## Experiment 2c — NaN and LR Instability Investigation
+## Experiment 2c — NaN Investigation and Fix
 
-### NaN loss starting at step ~26 (warmup, pre-fix run)
+### NaN loss starting at step 27 (post compile-fix run)
 
-After fixing the `mx.compile` bugs, a full pre-release run (1500-step config, `scalar_lr=0.5`) showed:
+After fixing the `mx.compile` bugs, the first real training run (1500-step config,
+`exp2-compression-validation.sh`) showed permanent NaN from step 27 onwards:
 
 ```
-step 00025 loss: 6.38 | lrm: 0.65
-step 00026 loss: nan   | lrm: 0.68
-step 00027 loss: nan   | lrm: 0.70
-... all nan from step 26 onwards, never recovering ...
+step 00026 loss: 6.335524 | lrm: 0.68   ← last good step
+[NaN] after optimizer step: first_nan_param=blocks.5.mlp.c_proj.weight
+step 00027 loss: 6.273738 | lrm: 0.70   ← compiled fn still seeing pre-NaN params
+[NaN] forward_backward accum=0/8: loss=nan  first_nan_grad=wte.weight
+[NaN] forward_backward accum=1/8: loss=nan  first_nan_grad=wte.weight
+... (all 8 accum steps) ...
+[NaN] step: skipping optimizer update
+step 00028 loss: nan   ← permanent from here
 ```
 
-**Root cause**: At lrm ≈ 0.65, the effective learning rates for scalar parameters reached
-values that caused residual stream amplification → bfloat16 activation overflow → NaN
-in every subsequent forward pass.
-
-The two scalar groups at fault:
-
-| Group | LR formula | Effective LR at lrm=0.65 |
-|-------|-----------|--------------------------|
-| `x0_lambdas` | `scalar_lr × lrm` | `0.5 × 0.65 = 0.325` |
-| `smear_lambda`, `backout_lambda` | `0.2 × lrm` (hardcoded) | `0.2 × 0.65 = 0.130` |
-
-After 25 warmup steps, these scalars had accumulated large values. Because `x0_lambdas`
-is used as:
+**Root cause**: `muon_step` ran the entire Polar Express orthogonalization loop in
+bfloat16:
 
 ```python
-# mlx_gpt.py — per-layer residual mix
-x = resid_lambdas[i] * x + x0_lambdas[i] * x0
-```
-
-with `x0_lambdas` initialized to **zeros**, unconstrained AdamW growth caused every layer to
-inject an increasing fraction of the initial embedding `x0` into the residual stream. At
-d6 (6 layers), total x0 injection = `x0_lambdas_value × 6`. Once large enough, the
-residual norm overflows bfloat16 range in the forward pass.
-
-**Why the NaN guard was insufficient**: the NaN guard in `MLXTrainer.forward_backward()`
-zeros out gradients when loss is NaN, preventing NaN from propagating through the gradient
-path. But:
-1. The forward pass itself was already producing NaN because the *model parameters* (not
-   the gradients) had drifted to a bad state
-2. AdamW's first-moment momentum from the previous 25 steps kept pushing `x0_lambdas` in
-   the same direction each step, even with zeroed gradients
-3. Result: NaN on every forward call, forever
-
-**Gradient clipping also does not help**: clipping operates on gradients, not on parameter
-values. Once the forward pass produces NaN (regardless of gradient magnitude), clipping
-has no effect.
-
-### Fix — scalar LR reduction
-
-Two changes to prevent unconstrained scalar parameter growth:
-
-**1. `src/nanochat/training/mlx_optimizer.py`** — smear group LR:
-```python
-# Before (caused NaN at step 26):
-dict(kind="adamw", _keys=smear_keys, lr=0.2, ...)
-
-# After:
-dict(kind="adamw", _keys=smear_keys, lr=0.02, ...)
-```
-
-**2. `src/nanochat/models/gpt.py`** — same change mirrored in the PyTorch backend:
-```python
-# Before:
-dict(kind="adamw", params=smear_params, lr=0.2, ...)
-
-# After:
-dict(kind="adamw", params=smear_params, lr=0.02, ...)
-```
-
-**3. `runs/exp2-compression-validation.sh`** and **`runs/exp2b-compile-fix-smoke.sh`** —
-pass `--scalar-lr=0.05` (overrides config default of 0.5):
-```bash
-# Added to both scripts:
---scalar-lr=0.05 \
-```
-
-**To revert**: restore `lr=0.2` in both `.py` files and remove `--scalar-lr=0.05` from
-the run scripts. The `scalar_lr` config default (0.5) requires no change — it is only
-overridden via the CLI flag.
-
-### Smoke test results (exp2b, 40 steps, scalar_lr=0.05, smear lr=0.02)
-
-Run: M3 Max 128GB, d6, 40 steps, `--num-iterations=40`, `--scalar-lr=0.05`.
-
-| step | loss      | lrm  | val/bpb  | compression ratio |
-|------|-----------|------|----------|-------------------|
-| 0    | 10.500000 | 0.03 | 3.184161 | 0.6995            |
-| 10   | 8.008622  | 0.28 | 2.042330 | 1.1000            |
-| 20   | 6.729373  | 0.53 | 1.827777 | 1.2404            |
-| 30   | 7.640053  | 0.78 | 2.540835 | 0.8824            |
-| 40   | 7.911662  | 1.00 | 2.411955 | —                 |
-
-**NaN eliminated**: no NaN throughout all 40 steps including the previously problematic
-zone (steps 26–35). The fix worked.
-
-**Loss rises steps 25–40**: loss decreases to 6.44 at step 24 then rises to 7.91 at step
-40. This is warmup-phase instability, not a new bug — see analysis below.
-
-### Loss rise at step 25 — warmup overshoot, not bfloat16
-
-The smoke test runs `--num-iterations=40` with the default `warmup_steps=40`, so the
-entire 40-step run is pure warmup (lrm ramps 0.03→1.00). There is no main phase or
-warmdown.
-
-**Why loss rises at step 25 (lrm=0.65)**:
-
-`x0_lambdas` is initialized to **zeros** and has no weight decay. Adam with `lr=0.05`
-and consistent gradient direction accumulates:
-
-```
-x0_value ≈ 0.05 × Σ(lrm₀..₂₄) × |Adam_step|
-          ≈ 0.05 × 25 × avg_lrm(≈0.32) × ~1.0
-          ≈ 0.40 per layer
-```
-
-At d6 (6 layers): total x0 injection = 0.40 × 6 = 2.4 × x0 added to the residual
-stream. The model's per-layer computation shifts from `x = x` (at init) toward
-`x = x + 0.4 × x0` (at step 25). This architectural drift pushes the model into a
-region of higher loss temporarily before it can adapt.
-
-In a full 1500-step run (warmup_steps=40), after step 40 the LR stops climbing and the
-model enters the main training phase with a stable (high) LR. `x0_lambdas` and other
-scalar parameters stabilize around their loss-optimal values. The warmup-only smoke test
-never shows this recovery.
-
-**Why bfloat16 is not the cause**:
-
-bfloat16 has the **same 8 exponent bits as float32** — the same overflow threshold
-(~3.4×10³⁸). The loss rise at step 25 is a smooth increase (6.44 → 6.83 → ... → 7.91),
-not a discrete overflow event. bfloat16's lower mantissa precision (7 bits vs 23) causes
-uniform loss elevation throughout training, not a step-specific inflection point.
-
-**float16 would be worse**: float16 has only 5 exponent bits (overflow threshold ~65504),
-making NaN from activation overflow far more likely than with bfloat16.
-
-**float32 is supported** via `NANOCHAT_DTYPE=float32` before training. It would use ~2×
-memory (~56GB for d6, within 128GB budget) and run ~1.5× slower. It is unlikely to fix
-the warmup overshoot because the root cause is algorithmic (LR too high for scalar params
-during warmup), not numerical precision. The Muon `polar_express` step internally casts
-to bfloat16 regardless of the model dtype:
-
-```python
-# mlx_optimizer.py — intentional, Polar Express is designed for bf16
+# mlx_optimizer.py — BUG: bfloat16 lacks precision for Polar Express
 x = g.astype(mx.bfloat16)
 ```
 
-**Scalar LR does not scale with depth**: `smear_lambda`/`backout_lambda` use a fixed
-`lr=0.02` (no `batch_lr_scale` or `dmodel_lr_scale` scaling). `x0_lambdas` uses
-`scalar_lr × batch_lr_scale`, which scales with batch size but not model width. With an
-explicit `--total-batch-size=524288 = B_REF`, `batch_lr_scale = 1.0` at all depths —
-meaning x0 and smear LRs are identical at d6, d8, and d12 when batch size is fixed.
+The Polar Express coefficients are large with opposite signs:
 
-### Next action
+```python
+_POLAR_EXPRESS_COEFFS = [
+    (8.156554524902461, -22.48329292557795, 15.878769915207462),
+    ...
+]
+```
 
-Run the full 1500-step `exp2-compression-validation.sh` with the current fixes
-(`scalar_lr=0.05`, smear `lr=0.02`). The critical question is whether loss recovers after
-step 40 (warmup end) and continues declining through the main phase. If loss keeps rising
-past step 40, reduce `--scalar-lr` further (e.g., `0.01`) or add weight decay to the
-`x0_lambdas` group.
+Each iteration computes `n = b*m + c*(m@m)` where `b ≈ -22` and `c ≈ 15`. This requires
+precise cancellation between large-magnitude opposite-sign terms. bfloat16 has only 7
+mantissa bits (~2 decimal digits of precision) — catastrophic cancellation produces inf
+values, and subsequent operations on inf produce NaN.
+
+This was not triggered in synthetic tests (`test_compiled_nan.py`) because small random
+gradient magnitudes keep the intermediate values small. After ~25 real training steps,
+gradient magnitudes grow enough to push the matrix multiply results into the cancellation
+regime.
+
+The first parameter to go NaN was `blocks.5.mlp.c_proj.weight` (a Muon group parameter
+— wide matrix, shape `(n_embd, n_embd*4)`). Wide matrices use the `m = x @ mT(x)` branch
+where `m` has shape `(rows, rows)`, making the cancellation issue worse at larger widths.
+
+**Why the NaN guard was insufficient**: the guard in `MLXTrainer` fires when `loss.item()`
+is NaN and skips the optimizer update. But the NaN came from inside `optimizer.update()`
+(the `muon_step` kernel), after the loss was computed and before the guard could fire.
+Once `blocks.5.mlp.c_proj.weight` was NaN, every subsequent forward pass produced NaN
+loss, so the guard correctly skipped all future updates — but the model was already
+corrupted and could not recover.
+
+### Fix — float32 Polar Express
+
+One-line change in `src/nanochat/training/mlx_optimizer.py`:
+
+```python
+# Before (caused NaN at step 26):
+x = g.astype(mx.bfloat16)
+
+# After:
+x = g.astype(mx.float32)
+```
+
+float32 has 23 mantissa bits — sufficient precision for the Polar Express cancellations.
+The NorMuon variance reduction section already ran in float32 (line 76:
+`g_f = g.astype(mx.float32)`); this fix extends that to the Polar Express loop. The final
+parameter update still happens in bfloat16 (line 95: `g = g.astype(stacked_params.dtype)`).
+
+### Exp2 re-run results (steps 1–46, float32 Polar Express)
+
+Run: M3 Max 128GB, d6, `exp2-compression-validation.sh` (1500 steps in progress).
+
+| step | loss      | lrm  | tok/sec |
+|------|-----------|------|---------|
+| 1    | 10.335526 | 0.05 | 44,986  |
+| 10   | 8.038718  | 0.28 | 43,336  |
+| 20   | 6.742749  | 0.53 | 42,395  |
+| 25   | 6.397652  | 0.65 | 41,267  |
+| 26   | 6.335524  | 0.68 | 40,924  |
+| 27   | 6.273738  | 0.70 | 40,193  |
+| 30   | 6.131146  | 0.78 | 42,611  |
+| 40   | 5.733963  | 1.00 | 43,994  |
+| 46   | 5.514418  | 1.00 | 41,277  |
+
+**NaN eliminated**: no `[NaN]` log lines at any step. Loss decreases monotonically through
+steps 25–27 (previously the failure zone) and continues declining into the main training
+phase. The fix is confirmed.
+
+**Performance**: ~41–45k tok/sec, consistent with the pre-NaN-fix baseline. The float32
+Polar Express adds a small overhead over the previous bfloat16 version but is within
+noise — the `@mx.compile` decorator on `muon_step` fuses the operations efficiently.
 
 ## Next Steps
 
 1. ~~Investigate loss logging~~ — root cause found and fixed (`mx.compile` stale params)
 2. ~~Investigate val/bpb at step 0~~ — resolved: theoretical floor is 2.28 bpb (avg 6.57 bytes/token); 3.21 is normal. Val/bpb increase is stale-gradient drift from the compile bug.
 3. ~~Fix experiment config: align `compression-log-every` with `eval-every`~~ — fixed: `compression-log-every=250` in `runs/exp2-compression-validation.sh`
-4. ~~Fix NaN at step 26~~ — fixed: `scalar_lr=0.05`, smear `lr=0.02`
-5. Run full Experiment 2 (1500 steps) — verify loss recovers after warmup and collect correlation data
+4. ~~Fix NaN at step 26~~ — fixed: float32 Polar Express in `muon_step` (`x = g.astype(mx.float32)`)
+5. Collect full Experiment 2 results (1500 steps in progress) — verify val/bpb decreases and collect compression correlation data

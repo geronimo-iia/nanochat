@@ -35,6 +35,7 @@ PYTHONUNBUFFERED=1 nohup uv run nanochat \
     --eval-tokens=5242880 \
     --core-metric-every=-1 \
     --sample-every=-1 \
+    --save-every=50 \
     > "$LOG_FILE" 2>&1 &
 
 echo "PID: $!"

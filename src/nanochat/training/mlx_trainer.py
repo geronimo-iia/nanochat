@@ -18,8 +18,16 @@ from nanochat.training.base.trainer import StepResult
 from nanochat.training.mlx_optimizer import MuonAdamW
 
 
+def _first_nan_key(tree) -> str | None:
+    """Return the first flat key whose array contains a NaN, or None."""
+    for k, v in nn.utils.tree_flatten(tree):
+        if isinstance(v, mx.array) and bool(mx.any(mx.isnan(v.astype(mx.float32))).item()):
+            return k
+    return None
+
+
 class _LossAndGrad(nn.Module):
-    """Thin nn.Module wrapper so nn.value_and_grad can capture model parameters."""
+    """Thin nn.Module wrapper so mx.compile can capture model parameters as state."""
 
     def __init__(self, model: "GPT") -> None:
         super().__init__()
@@ -28,7 +36,40 @@ class _LossAndGrad(nn.Module):
     def __call__(self, x: mx.array, y: mx.array):
         return self._lag(x, y)
 
+class _MultiStepLossAndGrad(nn.Module): # noqa: F811
+    """Accumulates value and gradient over N mini-batches in a single compiled call.
 
+    The Python for loop is unrolled at mx.compile trace time, creating one static
+    Metal program for all N forward + backward passes and their gradient accumulation.
+    """
+
+    def __init__(self, model: "GPT", grad_accum_steps: int) -> None:
+        super().__init__()
+        self._N = grad_accum_steps              # Python int — compile-time constant
+        self._lag = nn.value_and_grad(model, model)
+
+    def __call__(self, xs: mx.array, ys: mx.array):
+        # xs: (N, B, T), ys: (N, B, T) — all mini-batches stacked
+        # range(self._N) is a Python loop → unrolled at trace time into one graph.
+        accumulated_grads = None
+        total_loss = mx.array(0.0)
+
+        for i in range(self._N):
+            loss_i, grads_i = self._lag(xs[i], ys[i])
+            total_loss = total_loss + loss_i
+            if accumulated_grads is None:
+                accumulated_grads = grads_i
+            else:
+                accumulated_grads = nn.utils.tree_map(
+                    lambda a, b: a + b, accumulated_grads, grads_i
+                )
+
+        assert accumulated_grads is not None
+        return (
+            total_loss / self._N,
+            nn.utils.tree_map(lambda g: g / self._N, accumulated_grads),
+        )
+    
 class MLXTrainer:
     """MLX backend trainer. Owns the train loader, accumulation loop, and optimizer step."""
 
@@ -51,6 +92,7 @@ class MLXTrainer:
             group["initial_lr"] = group["lr"]
 
         self._accumulated_grads: dict | None = None
+        self._nan_detected = False
 
         # Prime the loader
         self._x: mx.array
@@ -71,25 +113,26 @@ class MLXTrainer:
 
         accumulated_grads = None
         train_loss = 0.0
+        self._nan_detected = False
 
-        nan_step = False
-        for _ in range(self._grad_accum_steps):
+        for i in range(self._grad_accum_steps):
             loss, grads = self._loss_and_grad(self._x, self._y)
             mx.eval(loss, grads)
             train_loss = loss.item()
             if not math.isfinite(train_loss):
-                # NaN/Inf loss — zero grads so optimizer skips this step.
-                # Keeps valid weights from previous step; training may recover next batch.
-                nan_step = True
-                if accumulated_grads is None:
-                    accumulated_grads = nn.utils.tree_map(mx.zeros_like, grads)
-            elif not nan_step:
-                if accumulated_grads is None:
-                    accumulated_grads = grads
-                else:
-                    accumulated_grads = nn.utils.tree_map(
-                        lambda a, b: a + b, accumulated_grads, grads
-                    )
+                # grads already evaluated — _first_nan_key is cheap, no extra sync.
+                key = _first_nan_key(grads)
+                print(
+                    f"[NaN] forward_backward accum={i}/{self._grad_accum_steps}: "
+                    f"loss={train_loss}  first_nan_grad={key}"
+                )
+                self._nan_detected = True
+            if accumulated_grads is None:
+                accumulated_grads = grads
+            else:
+                accumulated_grads = nn.utils.tree_map(
+                    lambda a, b: a + b, accumulated_grads, grads
+                )
             self._x, self._y, self._loader_state = self._next_batch()
 
         assert accumulated_grads is not None
@@ -105,14 +148,6 @@ class MLXTrainer:
     def reprime(self) -> None:
         self._x, self._y, self._loader_state = self._next_batch()
 
-    @staticmethod
-    def _clip_grads(grads: dict, max_norm: float = 1.0) -> dict:
-        flat = [v for _, v in nn.utils.tree_flatten(grads)]
-        total_norm_sq = sum(mx.sum(mx.square(v.astype(mx.float32))) for v in flat)
-        total_norm = mx.sqrt(total_norm_sq)
-        scale = max_norm / mx.maximum(total_norm, mx.array(max_norm))
-        return nn.utils.tree_map(lambda g: g * scale, grads)
-
     def step(self, lr_multiplier: float, momentum: float, weight_decay: float) -> None:
         assert self._accumulated_grads is not None, "step() called before forward_backward()"
         for group in self._optimizer._groups:
@@ -121,9 +156,17 @@ class MLXTrainer:
                 group["momentum"] = momentum
                 group["weight_decay"] = weight_decay
 
-        clipped_grads = self._clip_grads(self._accumulated_grads)
-        self._optimizer.update(self._orig_model, clipped_grads)
+        if self._nan_detected:
+            # NaN loss in forward_backward — skip optimizer to preserve model weights.
+            print("[NaN] step: skipping optimizer update")
+            return
+
+        self._optimizer.update(self._orig_model, self._accumulated_grads)
         mx.eval(self._orig_model.parameters(), self._optimizer.state())
+        # Param NaN check runs after the existing eval — no extra sync cost.
+        key = _first_nan_key(self._orig_model.parameters())
+        if key is not None:
+            print(f"[NaN] after optimizer step: first_nan_param={key}")
 
     def forward_logits(self) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
         logits = mx.stop_gradient(self._orig_model(self._last_x))
