@@ -5,8 +5,9 @@ read_when:
   - Writing or reviewing MLXTrainer.forward_backward
   - Debugging memory growth or stale graph issues in MLX
   - Understanding why mx.eval() placement matters
-status: draft
-last_updated: "2025-07-22"
+  - Understanding the fused _MultiStepLossAndGrad design
+status: active
+last_updated: "2026-03-23"
 ---
 
 # MLX Training Patterns
@@ -16,48 +17,102 @@ These patterns were validated during [MLX GPT](mlx-gpt-design.md) and [MLX Muon]
 
 ---
 
-## Grad accumulation
+## Grad accumulation — lazy N-call approach (current)
 
-`nn.value_and_grad` does **not** accumulate. Each call returns a fresh, independent grad tree.
-MLX has no `.grad` attribute on parameters — there is no state to accumulate into.
-
-Manual accumulation with `nn.utils.tree_map`:
+The production pattern calls the compiled function N times without `mx.eval` between
+steps, accumulating gradient trees as lazy MLX expressions. A single `mx.eval` at the
+end flushes all N forward/backward passes in one GPU submission.
 
 ```python
-loss_and_grad = nn.value_and_grad(model, model)
+# Compile once at trainer init — single-step function
+loss_and_grad = mx.compile(_LossAndGrad(model), inputs=[model], outputs=[model])
 
+# Each optimizer step: N lazy calls, single eval
 accumulated_grads = None
-total_loss = 0.0
-
+losses = []
 for x, y in microbatches:
-    loss, grads = loss_and_grad(x, y)
-    mx.eval(loss, grads)  # must eval each microbatch — see below
-    total_loss += loss.item()
-    if accumulated_grads is None:
-        accumulated_grads = grads
-    else:
-        accumulated_grads = nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
+    loss, grads = loss_and_grad(x, y)   # stays lazy — no mx.eval
+    losses.append(loss)
+    accumulated_grads = (
+        grads if accumulated_grads is None
+        else nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
+    )
 
-mean_grads = nn.utils.tree_map(lambda g: g / n_microbatches, accumulated_grads)
+mean_grads = nn.utils.tree_map(lambda g: g / N, accumulated_grads)
+mx.eval(losses, mean_grads)             # single sync for all N steps
 optimizer.update(model, mean_grads)
-mx.eval(model.parameters())
+mx.eval(model.parameters(), optimizer.state())
 ```
+
+**Why this is safe**: MLX's lazy evaluation keeps computation graphs in memory but does
+not execute them. Each compiled call adds its forward/backward graph to the pending
+queue. The `tree_map(a + b)` additions build lightweight lazy nodes on top. When
+`mx.eval` is finally called, all N forward/backward passes and the accumulation additions
+are submitted together. The total graph size is bounded — N forward passes plus
+N*(n_params) addition nodes — and no single Metal kernel exceeds argument buffer limits.
+
+**Correctness**: deferring `mx.eval` to after all N calls produces numerically equivalent
+gradients to the per-step eval approach (max_diff < 1e-3 across all parameters). See
+`tests/test_training/test_mlx_trainer.py::test_lazy_accum_matches_eager`.
+
+### Why not fuse all N steps into one compiled call?
+
+The natural extension — unrolling the accumulation loop inside `mx.compile` so all N
+forward/backward passes and gradient additions become one Metal program — was implemented
+and validated on small models (+7.4% tok/sec on TinyGPT). However it fails on real models:
+
+```
+RuntimeError: [compile] Too many inputs/outputs fused in the Metal Compiled primitive
+which exhausted the available argument buffers for the kernel.
+```
+
+Metal has a per-kernel argument buffer limit. With N=8 accumulation steps and a model
+with many parameter tensors, the fused kernel must pass N×n_params gradient buffers as
+inputs/outputs to a single kernel, exceeding the limit. The lazy N-call approach keeps
+each compiled call to n_params buffers — well within limits — while still achieving a
+single `mx.eval` per optimizer step. See
+[docs/dev/lazy-grad-accumulation.md](../dev/lazy-grad-accumulation.md) for the full
+fused design (useful if MLX raises the limit or if the model is small enough).
 
 ---
 
 ## `mx.eval()` cadence
 
 MLX is lazy — operations build a compute graph but nothing executes until `mx.eval()` is called.
-Without an explicit eval between microbatches, the graph grows unboundedly in memory before
-anything runs. The correct cadence:
+
+With the fused compiled approach, the correct cadence is:
 
 | When | What to eval |
 |---|---|
-| After each microbatch forward/backward | `mx.eval(loss, grads)` |
-| After optimizer update | `mx.eval(model.parameters())` |
-| Before logging a loss value | `loss.item()` triggers eval implicitly |
+| After the single compiled call (all N microbatches) | `mx.eval(loss, mean_grads)` |
+| After optimizer update | `mx.eval(model.parameters(), optimizer.state())` |
 
-Do **not** defer all evals to the end of the accumulation loop.
+The fused approach intentionally defers all N microbatch evals to a single call. This is
+safe because the entire accumulation is inside one compiled graph — MLX knows the full
+computation ahead of time and does not grow an unbounded graph.
+
+**Memory**: with N microbatches compiled into one graph, activation tensors for all N
+forward passes are live simultaneously until the single eval. For N=8 on d6, this is
+~500 MB of extra peak activation memory vs per-step eval. On M3 Max 128 GB this is
+negligible.
+
+---
+
+## `mx.compile` with `inputs=` and `outputs=`
+
+Both flags are required when compiling a function that reads and writes model parameters:
+
+```python
+mx.compile(fn, inputs=[model], outputs=[model])
+```
+
+| Flag | Effect | Without it |
+|---|---|---|
+| `inputs=[model]` | Re-reads model params at each call | Params baked as constants at compile time → loss flat forever (stale-params bug) |
+| `outputs=[model]` | Allows grad computation to update param array refs | Next `mx.eval()` crashes: "eval array without primitive" |
+
+Both flags were required to fix the original `mx.compile` bugs (see
+[docs/dev/experiments/exp2-compression-validation.md](../dev/experiments/exp2-compression-validation.md)).
 
 ---
 

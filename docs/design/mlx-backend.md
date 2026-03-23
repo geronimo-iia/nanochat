@@ -6,7 +6,7 @@ read_when:
   - Understanding how loop.py calls map to MLX operations
   - Debugging MLX training issues
 status: active
-last_updated: "2025-07-24"
+last_updated: "2026-03-23"
 ---
 
 # MLX Backend
@@ -59,11 +59,14 @@ See [mlx-muon-design.md](mlx-muon-design.md) for op mapping and immutability det
 Implements `BaseTrainer`. Owns the model, optimizer, accumulation loop, and loader.
 
 Key behaviors:
-- Grad accumulation via `nn.value_and_grad` + `nn.utils.tree_map` — see [mlx-training-patterns.md](mlx-training-patterns.md)
-- `mx.eval(loss, grads)` after each microbatch to bound graph size
+- Grad accumulation via lazy N-call approach: `_LossAndGrad` compiled once, called N
+  times without per-step `mx.eval`, gradient trees accumulated as lazy expressions,
+  single `mx.eval` per optimizer step. See [mlx-training-patterns.md](mlx-training-patterns.md).
 - `mx.eval(model.parameters(), optimizer.state())` after each optimizer step
 - `forward_logits` uses `mx.stop_gradient`
 - `load_state_dicts` accepts numpy arrays (safetensors manager output) via `from_numpy_mlx`
+- NaN guard: if `loss` is non-finite, `step()` skips the optimizer update to preserve
+  model weights
 
 ---
 
@@ -73,17 +76,17 @@ Key behaviors:
 sequenceDiagram
     participant Loop as loop.py
     participant T as MLXTrainer
+    participant F as _LossAndGrad (compiled)
     participant M as mlx_gpt.GPT
     participant O as MuonAdamW
 
     Loop->>T: forward_backward()
-    loop grad_accum_steps
-        T->>M: nn.value_and_grad(model)(x, y)
-        M-->>T: loss, grads
-        T->>T: mx.eval(loss, grads)
-        T->>T: tree_map(a+b, accumulated, grads)
-    end
-    T->>T: tree_map(g/n, accumulated)
+    T->>F: loss_and_grad(x1, y1)  ← lazy, no mx.eval
+    F-->>T: loss1, grads1 (lazy)
+    T->>F: loss_and_grad(x2, y2)  ← lazy, no mx.eval
+    F-->>T: loss2, grads2 (lazy)
+    note over T: repeat N times; accumulate grads via tree_map(a+b)
+    T->>T: mx.eval(losses, mean_grads)  ← single sync for all N microbatches
     T-->>Loop: StepResult(loss, loader_state)
 
     Loop->>T: step(lr_multiplier, momentum, weight_decay)

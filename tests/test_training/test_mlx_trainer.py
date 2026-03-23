@@ -177,10 +177,12 @@ def test_loader_state_preserved_across_forward_backward():
     assert call_count == 1  # primed once at init
 
     trainer.forward_backward()
-    assert call_count == 1 + grad_accum_steps  # each microbatch pulls one batch
+    # forward_backward loads (grad_accum_steps - 1) more batches during pre-loading,
+    # then one final advance — total N loads per step.
+    assert call_count == 1 + grad_accum_steps
 
     trainer.forward_backward()
-    assert call_count == 1 + 2 * grad_accum_steps  # second step continues from where we left off
+    assert call_count == 1 + 2 * grad_accum_steps
 
 
 def test_grad_clip_large_grads_stay_finite():
@@ -211,11 +213,9 @@ def test_nan_guard_skips_bad_step():
     before = {k: np.array(v) for k, v in
               mlx_nn.utils.tree_flatten(trainer._orig_model.trainable_parameters())}
 
-    # Monkeypatch _loss_and_grad to return NaN loss, simulating the step-28 failure
+    # Monkeypatch _loss_and_grad to return NaN loss, simulating the step-28 failure.
     real_lag = trainer._loss_and_grad
-    call_count = [0]
     def nan_loss_and_grad(x, y):
-        call_count[0] += 1
         loss, grads = real_lag(x, y)
         return mx.array(float("nan")), grads
     trainer._loss_and_grad = nan_loss_and_grad
@@ -242,3 +242,59 @@ def test_eval_context_restores_on_exception():
     except RuntimeError:
         pass
     trainer.forward_backward()
+
+
+def test_lazy_accum_matches_eager():
+    """Lazy accumulation (N calls, single eval) must produce the same gradients
+    as N calls with per-step mx.eval.
+
+    Validates the lazy accumulation approach used in MLXTrainer.forward_backward:
+    deferring mx.eval to after all N compiled calls produces numerically equivalent
+    accumulated gradients (max_diff < 1e-3 across all parameters).
+    """
+    from nanochat.training.mlx_trainer import _LossAndGrad
+
+    N = 2
+    rng = np.random.default_rng(42)
+    batches = [
+        (
+            mx.array(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32)),
+            mx.array(rng.integers(0, CONFIG.vocab_size, (2, CONFIG.sequence_len)).astype(np.int32)),
+        )
+        for _ in range(N)
+    ]
+
+    mx.random.seed(0)
+    ref = GPT(CONFIG)
+    ref_weights = list(mlx_nn.utils.tree_flatten(ref.parameters()))
+
+    def make_model():
+        m = GPT(CONFIG)
+        m.update(mlx_nn.utils.tree_unflatten([(k, v) for k, v in ref_weights]))
+        mx.eval(m.parameters())
+        return m
+
+    def accum(model, eval_each_step: bool) -> dict:
+        lag = _LossAndGrad(model)
+        compiled = mx.compile(lag, inputs=[model], outputs=[model])
+        grads_acc = None
+        for x, y in batches:
+            _, g = compiled(x, y)
+            if eval_each_step:
+                mx.eval(g)
+            grads_acc = g if grads_acc is None else mlx_nn.utils.tree_map(
+                lambda a, b: a + b, grads_acc, g
+            )
+        result = mlx_nn.utils.tree_map(lambda g: g / N, grads_acc)
+        mx.eval(result)
+        return dict(mlx_nn.utils.tree_flatten(result))
+
+    eager_flat = accum(make_model(), eval_each_step=True)
+    lazy_flat  = accum(make_model(), eval_each_step=False)
+
+    assert set(eager_flat.keys()) == set(lazy_flat.keys())
+    for k in eager_flat:
+        diff = mx.max(mx.abs(
+            eager_flat[k].astype(mx.float32) - lazy_flat[k].astype(mx.float32)
+        )).item()
+        assert diff < 1e-3, f"Gradient mismatch for {k}: max_diff={diff}"
