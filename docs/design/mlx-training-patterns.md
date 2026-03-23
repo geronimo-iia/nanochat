@@ -57,22 +57,26 @@ gradients to the per-step eval approach (max_diff < 1e-3 across all parameters).
 
 ### Why not fuse all N steps into one compiled call?
 
-The natural extension — unrolling the accumulation loop inside `mx.compile` so all N
-forward/backward passes and gradient additions become one Metal program — was implemented
-and validated on small models (+7.4% tok/sec on TinyGPT). However it fails on real models:
+The `_MultiStepLossAndGrad` class (kept in `mlx_trainer.py`) fuses K steps into one
+Metal program. Two approaches were tested on d6/M3 Max (N=8, `_CHUNK_SIZE` in the source):
 
+**K=8 (fully fused)**: Crashes on d6.
 ```
 RuntimeError: [compile] Too many inputs/outputs fused in the Metal Compiled primitive
 which exhausted the available argument buffers for the kernel.
 ```
+Metal's per-kernel argument buffer limit is exceeded: N×n_params gradient buffers
+(8 × 74 × 2 = 1184 buffers) in a single kernel.
 
-Metal has a per-kernel argument buffer limit. With N=8 accumulation steps and a model
-with many parameter tensors, the fused kernel must pass N×n_params gradient buffers as
-inputs/outputs to a single kernel, exceeding the limit. The lazy N-call approach keeps
-each compiled call to n_params buffers — well within limits — while still achieving a
-single `mx.eval` per optimizer step. See
+**K=2 (chunked fused)**: Compiles successfully (296 buffers, within limit) but is
+**~25% slower** than K=1 (~30k vs ~41k tok/sec on d6/M3 Max). Cause: fusing 2 steps
+keeps both forward-pass activation tensors live simultaneously, increasing bandwidth
+pressure on Apple Silicon's unified memory. Compile time at step 0 also grows 2.7×.
+
+**Conclusion**: K=1 (current, `_CHUNK_SIZE = 1`) is fastest. Increase `_CHUNK_SIZE`
+only if a future MLX version improves activation recompute/offload. See
 [docs/dev/lazy-grad-accumulation.md](../dev/lazy-grad-accumulation.md) for the full
-fused design (useful if MLX raises the limit or if the model is small enough).
+fused design and validation data.
 
 ---
 

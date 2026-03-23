@@ -37,6 +37,53 @@ class _LossAndGrad(nn.Module):
         return self._lag(x, y)
 
 
+class _MultiStepLossAndGrad(nn.Module):
+    """Fused K-step loss+grad for chunked gradient accumulation.
+
+    Compiles K forward/backward passes into a single Metal program via mx.compile.
+    The Python for-loop over range(steps) is unrolled at trace time.
+
+    Buffer count per compiled call: K × n_params × 2 (gradient in+out).
+    Safe for K ≤ 4 on d6 (~74 param tensors). K=8 exceeded Metal's per-kernel limit:
+      RuntimeError: [compile] Too many inputs/outputs fused in the Metal Compiled
+      primitive which exhausted the available argument buffers for the kernel.
+
+    See docs/dev/lazy-grad-accumulation.md for full design and validation data.
+    """
+
+    def __init__(self, model: "GPT", steps: int) -> None:
+        super().__init__()
+        self._lag = nn.value_and_grad(model, model)
+        self._steps = steps
+
+    def __call__(self, xs: mx.array, ys: mx.array):
+        # xs: (K, B, T), ys: (K, B, T) — loop unrolled at mx.compile trace time
+        accumulated_grads = None
+        total_loss = mx.zeros(())
+        for i in range(self._steps):
+            loss, grads = self._lag(xs[i], ys[i])
+            total_loss = total_loss + loss
+            accumulated_grads = (
+                grads if accumulated_grads is None
+                else nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
+            )
+        mean_loss = total_loss / self._steps
+        mean_grads = nn.utils.tree_map(lambda g: g / self._steps, accumulated_grads)
+        return mean_loss, mean_grads
+
+
+# Chunk size for _MultiStepLossAndGrad.
+#
+# K=2 validated: compiles within Metal's per-kernel argument buffer limit
+# (74 param tensors × 2 × 2 = 296 buffers; K=8 crashed with 1184 buffers).
+# However, K=2 is ~25% SLOWER than K=1 on d6/M3 Max (~30k vs ~41k tok/sec)
+# because fusing 2 steps keeps both forward-pass activation tensors live
+# simultaneously, increasing bandwidth pressure on Apple Silicon unified memory.
+#
+# Set to 1 to disable fused chunking and use _LossAndGrad (single-step, fastest).
+# Increase to 2+ only if a future MLX version improves activation recompute/offload.
+_CHUNK_SIZE = 1
+
 
 class MLXTrainer:
     """MLX backend trainer. Owns the train loader, accumulation loop, and optimizer step."""
@@ -52,7 +99,20 @@ class MLXTrainer:
         self._optimizer = optimizer
         self._grad_accum_steps = grad_accum_steps
         self._loader = torch_loader
-        loss_and_grad = _LossAndGrad(orig_model)
+
+        # Select chunk size: compile _CHUNK_SIZE steps per Metal program when possible.
+        # Each chunk call costs chunk_size × n_params × 2 argument buffers — stays within
+        # Metal's per-kernel limit. Falls back to _LossAndGrad (chunk_size=1) when
+        # grad_accum_steps is not divisible by _CHUNK_SIZE.
+        self._chunk_size = (
+            _CHUNK_SIZE
+            if grad_accum_steps > 1 and grad_accum_steps % _CHUNK_SIZE == 0
+            else 1
+        )
+        if self._chunk_size > 1:
+            loss_and_grad = _MultiStepLossAndGrad(orig_model, self._chunk_size)
+        else:
+            loss_and_grad = _LossAndGrad(orig_model)
         self._loss_and_grad = mx.compile(loss_and_grad, inputs=[orig_model], outputs=[orig_model])
 
         # Snapshot initial LRs for scheduler multiplication
@@ -80,33 +140,42 @@ class MLXTrainer:
         self._last_y = self._y
         self._nan_detected = False
 
-        # Per-step eval accumulation: materialize accumulated_grads after each step to
-        # prevent deep lazy expression nesting. Without this, N=8 steps build a 7-level
-        # chain of lazy additions per parameter (7×n_params extra kernel launches on eval).
-        # Per-step eval keeps nesting depth ≤1 and avoids the overhead.
+        # Chunked accumulation: _MultiStepLossAndGrad compiles chunk_size steps into one
+        # Metal program (chunk_size=2 by default). Each compiled call returns mean_loss and
+        # mean_grads over its chunk. mx.eval after each chunk prevents lazy nesting between
+        # chunks. For chunk_size=1 (odd grad_accum_steps), falls back to _LossAndGrad.
         #
-        # Note: a fused single-call approach (_MultiStepLossAndGrad) was prototyped but
-        # hits Metal's argument buffer limit on real models — N×n_params buffers in one
-        # kernel exceeds the per-kernel maximum. See docs/dev/lazy-grad-accumulation.md.
+        # Gradient math: each chunk returns grads already divided by chunk_size. Dividing
+        # the final sum by n_chunks gives the mean over all grad_accum_steps microbatches:
+        #   sum(chunk_means) / n_chunks = (g1+...+gN) / (chunk_size × n_chunks) = mean(g)
         accumulated_grads = None
         losses: list[mx.array] = []
+        n_iters = self._grad_accum_steps // self._chunk_size
 
-        for _ in range(self._grad_accum_steps):
-            loss, grads = self._loss_and_grad(self._x, self._y)
-            losses.append(loss)
-            if accumulated_grads is None:
-                accumulated_grads = grads
+        for _ in range(n_iters):
+            if self._chunk_size > 1:
+                # Collect chunk_size batches and stack for the fused compiled call.
+                chunk_xs, chunk_ys = [], []
+                for _ in range(self._chunk_size):
+                    chunk_xs.append(self._x)
+                    chunk_ys.append(self._y)
+                    self._x, self._y, self._loader_state = self._next_batch()
+                loss, grads = self._loss_and_grad(mx.stack(chunk_xs), mx.stack(chunk_ys))
             else:
-                accumulated_grads = nn.utils.tree_map(
-                    lambda a, b: a + b, accumulated_grads, grads
-                )
-            mx.eval(accumulated_grads)  # Materialize — prevents 7-level lazy nesting at N=8
-            self._x, self._y, self._loader_state = self._next_batch()
+                loss, grads = self._loss_and_grad(self._x, self._y)
+                self._x, self._y, self._loader_state = self._next_batch()
+
+            losses.append(loss)
+            accumulated_grads = (
+                grads if accumulated_grads is None
+                else nn.utils.tree_map(lambda a, b: a + b, accumulated_grads, grads)
+            )
+            mx.eval(accumulated_grads)  # materialize — prevents nesting between chunks
 
         assert accumulated_grads is not None
-        if self._grad_accum_steps > 1:
+        if n_iters > 1:
             self._accumulated_grads = nn.utils.tree_map(
-                lambda g: g / self._grad_accum_steps, accumulated_grads
+                lambda g: g / n_iters, accumulated_grads
             )
         else:
             self._accumulated_grads = accumulated_grads
@@ -119,8 +188,8 @@ class MLXTrainer:
             if not math.isfinite(lv):
                 key = _first_nan_key(self._accumulated_grads)
                 print(
-                    f"[NaN] forward_backward accum={i}/{self._grad_accum_steps}: "
-                    f"loss={lv}  first_nan_grad={key}"
+                    f"[NaN] forward_backward chunk={i}/{n_iters} "
+                    f"(chunk_size={self._chunk_size}): loss={lv}  first_nan_grad={key}"
                 )
                 self._nan_detected = True
                 break
