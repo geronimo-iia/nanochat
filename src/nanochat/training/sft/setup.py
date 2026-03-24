@@ -4,6 +4,10 @@ from typing import Callable
 import torch
 
 from nanochat import workspace
+from nanochat.checkpoint import make_checkpoint_manager
+from nanochat.checkpoint.compat import patch_missing_config_keys
+from nanochat.checkpoint.discovery import find_last_step
+from nanochat.checkpoint.logger import RankZeroLogger
 from nanochat.common import (
     WandbProtocol,
     autodetect_device_type,
@@ -17,6 +21,8 @@ from nanochat.common import (
     print_banner,
 )
 from nanochat.config import Config
+from nanochat.model_factory import load_model_from_dir, load_optimizer_state
+from nanochat.models.config import GPTConfig
 from nanochat.models.flash_attention import HAS_FA3
 from nanochat.tasks.base import TaskMixture
 from nanochat.tasks.customjson import CustomJSON
@@ -24,8 +30,7 @@ from nanochat.tasks.gsm8k import GSM8K
 from nanochat.tasks.mmlu import MMLU
 from nanochat.tasks.smoltalk import SmolTalk
 from nanochat.tasks.spellingbee import SimpleSpelling, SpellingBee
-from nanochat.tokenizer import get_token_bytes
-from nanochat.training.checkpoint import load_model_from_dir, load_optimizer_state
+from nanochat.tokenizer import get_token_bytes, get_tokenizer
 from nanochat.training.sft.dataloader import sft_data_generator_bos_bestfit
 from nanochat.training.sft.schedulers import sft_lr_scheduler, sft_muon_momentum_scheduler
 from nanochat.training.sft.state import SFTState
@@ -66,6 +71,7 @@ class SFTTrainingSetup:
         "get_max_memory",
         "wandb_run",
         "state",
+        "trainer",  # BaseTrainer | None — set for MLX, None for PyTorch path
     )
 
     def __init__(
@@ -97,6 +103,7 @@ class SFTTrainingSetup:
         get_max_memory: Callable[[], int],
         wandb_run: WandbProtocol,
         state: SFTState,
+        trainer: object = None,
     ):
         self.config = config
         self.device_type = device_type
@@ -125,10 +132,223 @@ class SFTTrainingSetup:
         self.get_max_memory = get_max_memory
         self.wandb_run = wandb_run
         self.state = state
+        self.trainer = trainer
+
+
+def _build_sft_task_mixture(config: Config, tokenizer: object):
+    """Build the SFT task mixture and val dataset (backend-agnostic)."""
+    from nanochat import workspace as _ws
+    identity_conversations_filepath = _ws.identity_data_path()
+    train_tasks = [
+        SmolTalk(split="train"),
+        CustomJSON(filepath=identity_conversations_filepath),
+        CustomJSON(filepath=identity_conversations_filepath),
+        *[MMLU(subset="auxiliary_train", split="train") for _ in range(config.sft.mmlu_epochs)],
+        *[GSM8K(subset="main", split="train") for _ in range(config.sft.gsm8k_epochs)],
+        SimpleSpelling(size=200000, split="train"),
+        SpellingBee(size=80000, split="train"),
+    ]
+    train_dataset = TaskMixture(train_tasks)
+    val_dataset = TaskMixture(
+        [
+            SmolTalk(split="test"),
+            MMLU(subset="all", split="test", stop=5200),
+            GSM8K(subset="main", split="test", stop=420),
+        ]
+    )
+    return train_dataset, val_dataset
+
+
+def mlx_sft_setup(config: Config) -> "SFTTrainingSetup":
+    """Build SFT training state for the MLX backend (Apple Silicon)."""
+    from nanochat.common import get_mlx_compute_dtype, get_mlx_device_info, mlx_compute_init
+    from nanochat.training.base.mlx_trainer import MLXTrainer
+    from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
+
+    mlx_compute_init()
+    info = get_mlx_device_info()
+    print0(
+        f"MLX device: {info['device_name']} | RAM: {info['memory_size'] / 1024**3:.0f}GB | arch: {info['architecture']}"
+    )
+    print0("✓ MLX backend — single device, mx.compile, unified memory")
+
+    # --- Load base checkpoint (model weights, metadata) ---
+    _logger = RankZeroLogger(__name__)
+    ckpt_dir_base = workspace.checkpoint_dir("base", config.common.model_tag if config.common.model_tag else None)
+    manager = make_checkpoint_manager(ckpt_dir_base, config.checkpoint, _logger)
+    source_step = config.sft.source_step
+    if source_step is None:
+        source_step = find_last_step(ckpt_dir_base)
+    print0(f"Loading base checkpoint from {ckpt_dir_base} step {source_step}")
+    ckpt = manager.load(source_step, torch.device("cpu"), load_optimizer=False)
+    metadata = ckpt.metadata
+    meta_dict = metadata.to_dict()
+
+    # --- Inherit hyperparameters from checkpoint metadata ---
+    pretrain_user_config = meta_dict.get("user_config", {})
+    for name, fallback, source in [
+        ("max_seq_len", 2048, meta_dict),
+        ("device_batch_size", 32, meta_dict),
+        ("total_batch_size", 524288, meta_dict),
+        ("embedding_lr", 0.3, pretrain_user_config),
+        ("unembedding_lr", 0.004, pretrain_user_config),
+        ("matrix_lr", 0.02, pretrain_user_config),
+    ]:
+        arg_val = getattr(config.sft, name)
+        pretrain_val = source.get(name) if isinstance(source, dict) else None
+        if arg_val is None:
+            resolved = pretrain_val if pretrain_val is not None else fallback
+            setattr(config.sft, name, resolved)
+            print0(f"Inherited {name}={resolved} from pretrained checkpoint")
+        elif pretrain_val is not None and arg_val != pretrain_val:
+            print0(f"NOTE: --{name.replace('_', '-')}={arg_val} overrides pretrained value of {pretrain_val}")
+        else:
+            print0(f"Using {name}={arg_val}")
+
+    # --- Build MLX model ---
+    model_config_kwargs = dict(metadata.model_config)
+    patch_missing_config_keys(model_config_kwargs, _logger.info)
+    gpt_config = GPTConfig(**model_config_kwargs)
+
+    from nanochat.models.mlx_gpt import GPT as MLXGPT
+    model = MLXGPT(gpt_config)
+    compute_dtype = get_mlx_compute_dtype()
+    print0(f"COMPUTE_DTYPE: {compute_dtype} (MLX)")
+    model.set_dtype(compute_dtype)
+
+    # --- Resolve derived quantities ---
+    depth = gpt_config.n_layer
+    tokens_per_fwdbwd = config.sft.device_batch_size * config.sft.max_seq_len
+    grad_accum_steps = config.sft.total_batch_size // tokens_per_fwdbwd
+    print0(
+        f"Tokens / micro-batch: {config.sft.device_batch_size} x {config.sft.max_seq_len} = {tokens_per_fwdbwd:,}"
+    )
+    print0(f"Total batch size {config.sft.total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
+
+    # --- Build optimizer (apply init_lr_frac before MLXTrainer so initial_lr is scaled) ---
+    optimizer = MuonAdamW(build_param_groups(
+        model,
+        unembedding_lr=config.sft.unembedding_lr,
+        embedding_lr=config.sft.embedding_lr,
+        matrix_lr=config.sft.matrix_lr,
+        weight_decay=0.0,
+    ))
+    for group in optimizer._groups:
+        group["lr"] = group["lr"] * config.sft.init_lr_frac
+
+    # --- Build tokenizer and task mixture ---
+    tokenizer = get_tokenizer()
+    user_config = asdict(config)
+    train_dataset, val_dataset = _build_sft_task_mixture(config, tokenizer)
+    print0(
+        f"Training mixture: {len(train_dataset):,} rows "
+        f"(MMLU x{config.sft.mmlu_epochs}, GSM8K x{config.sft.gsm8k_epochs})"
+    )
+
+    state = SFTState.fresh()
+
+    ckpt_dir_name = config.common.model_tag if config.common.model_tag else f"d{depth}"
+    ckpt_dir_sft = workspace.checkpoint_dir("sft", ckpt_dir_name)
+
+    model_config = {
+        "sequence_len": config.sft.max_seq_len,
+        "vocab_size": tokenizer.get_vocab_size(),
+        "n_layer": depth,
+        "n_head": gpt_config.n_head,
+        "n_kv_head": gpt_config.n_kv_head,
+        "n_embd": gpt_config.n_embd,
+        "window_pattern": gpt_config.window_pattern,
+    }
+    state.model_config = model_config
+    state.user_config = user_config
+
+    def make_loader(split: str):
+        return sft_data_generator_bos_bestfit(
+            state=state,
+            config=config,
+            tokenizer=tokenizer,
+            ddp_rank=0,
+            ddp_world_size=1,
+            device=torch.device("cpu"),
+            device_type="mlx",
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            split=split,
+        )
+
+    train_loader = make_loader("train")
+    build_val_loader = lambda: make_loader("val")
+
+    # --- Build MLXTrainer and load base checkpoint weights ---
+    trainer = MLXTrainer(model, optimizer, grad_accum_steps, train_loader)
+    model_state = {k.removeprefix("_orig_mod."): v for k, v in ckpt.model_state.items()}
+    # Load model weights only; optimizer starts fresh (base checkpoint was likely PyTorch)
+    import mlx.nn as mlx_nn
+    from nanochat.checkpoint.convert import from_numpy_mlx
+    import numpy as np
+    if any(isinstance(v, np.ndarray) for v in model_state.values()):
+        mlx_state = from_numpy_mlx(model_state)
+    else:
+        mlx_state = model_state
+    current_dtypes = {k: v.dtype for k, v in mlx_nn.utils.tree_flatten(model.parameters())}
+    mlx_state = {k: v.astype(current_dtypes[k]) if k in current_dtypes else v for k, v in mlx_state.items()}
+    model.update(mlx_nn.utils.tree_unflatten(list(mlx_state.items())))
+    import mlx.core as mx
+    mx.eval(model.parameters())
+    print0(f"Loaded base checkpoint weights (step {source_step}) into MLX model")
+
+    if config.sft.load_optimizer:
+        print0("WARNING: MLX SFT optimizer warm-start from PyTorch base checkpoint not supported; starting fresh")
+
+    get_lr_multiplier = sft_lr_scheduler(config.sft.warmup_ratio, config.sft.warmdown_ratio, config.sft.final_lr_frac)
+    get_muon_momentum = sft_muon_momentum_scheduler()
+
+    wandb_run = init_wandb(user_config=user_config, master_process=True, project_suffix="sft")
+
+    token_bytes = get_token_bytes(device="cpu")
+
+    return SFTTrainingSetup(
+        config=config,
+        device_type="mlx",
+        ddp_rank=0,
+        ddp_world_size=1,
+        ddp=False,
+        device=torch.device("cpu"),
+        master_process=True,
+        orig_model=model,
+        model=None,          # unused in MLX path (loop uses trainer)
+        tokenizer=tokenizer,
+        token_bytes=token_bytes,
+        optimizer=None,      # unused in MLX path (trainer owns optimizer)
+        scaler=None,
+        train_loader=None,   # unused in MLX path (trainer owns loader)
+        build_val_loader=build_val_loader,
+        ckpt_dir=ckpt_dir_sft,
+        user_config=user_config,
+        model_config=model_config,
+        num_flops_per_token=float("inf"),
+        gpu_peak_flops=float("inf"),
+        grad_accum_steps=grad_accum_steps,
+        get_lr_multiplier=get_lr_multiplier,
+        get_muon_momentum=get_muon_momentum,
+        synchronize=lambda: None,
+        get_max_memory=lambda: 0,
+        wandb_run=wandb_run,
+        state=state,
+        trainer=trainer,
+    )
 
 
 def setup(config: Config) -> SFTTrainingSetup:
     """Initialize compute, model, optimizer, dataloaders and schedulers for SFT."""
+    device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
+    if device_type == "mlx":
+        return mlx_sft_setup(config)
+    return _torch_sft_setup(config)
+
+
+def _torch_sft_setup(config: Config) -> SFTTrainingSetup:
+    """PyTorch SFT setup (CUDA/CPU/MPS)."""
     print_banner()
 
     device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
@@ -152,7 +372,7 @@ def setup(config: Config) -> SFTTrainingSetup:
         )
 
     model, tokenizer, meta = load_model_from_dir(
-        device=device, phase="base", model_tag=config.sft.model_tag, step=config.sft.model_step
+        device=device, phase="base", config=config.checkpoint, model_tag=config.common.model_tag, step=config.sft.source_step
     )
 
     # Inherit training hyperparameters from pretrained checkpoint
@@ -203,8 +423,9 @@ def setup(config: Config) -> SFTTrainingSetup:
             source="base",
             device=device,
             rank=ddp_rank,
-            model_tag=config.sft.model_tag,
-            step=config.sft.model_step,
+            config=config.checkpoint,
+            model_tag=config.common.model_tag,
+            step=config.sft.source_step,
         )
         if optimizer_data is not None:
             base_lrs = [group["lr"] for group in optimizer.param_groups]
@@ -248,7 +469,7 @@ def setup(config: Config) -> SFTTrainingSetup:
 
     state = SFTState.fresh()
 
-    ckpt_dir_name = config.sft.model_tag if config.sft.model_tag else f"d{depth}"
+    ckpt_dir_name = config.common.model_tag if config.common.model_tag else f"d{depth}"
     ckpt_dir = workspace.checkpoint_dir("sft", ckpt_dir_name)
 
     model_config = {
@@ -260,6 +481,8 @@ def setup(config: Config) -> SFTTrainingSetup:
         "n_embd": model.config.n_embd,
         "window_pattern": model.config.window_pattern,
     }
+    state.model_config = model_config
+    state.user_config = user_config
 
     def make_loader(split: str):
         return sft_data_generator_bos_bestfit(

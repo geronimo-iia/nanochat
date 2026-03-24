@@ -64,4 +64,16 @@ def get_device_sync(device_type: str) -> tuple[object, object]:
         return torch.cuda.synchronize, torch.cuda.max_memory_allocated
     if device_type == "mps":
         return torch.mps.synchronize, torch.mps.current_allocated_memory
+    if device_type == "mlx":
+        import mlx.core as mx
+        return lambda: mx.eval([]), mx.get_peak_memory
     return lambda: None, lambda: 0
+
+
+def clear_device_cache(device_type: str) -> None:
+    """Release unused memory back to the allocator for the given device type."""
+    if device_type == "mps":
+        torch.mps.empty_cache()
+    elif device_type == "mlx":
+        import mlx.core as mx
+        mx.clear_cache()

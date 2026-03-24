@@ -1,5 +1,6 @@
 """Public re-exports for nanochat.config."""
 
+from nanochat.config.checkpoint import CheckpointConfig
 from nanochat.config.cli import config_init, config_show
 from nanochat.config.common import CommonConfig
 from nanochat.config.config import Config
@@ -14,6 +15,7 @@ from nanochat.config.tokenizer import TokenizerConfig
 from nanochat.config.training import TrainingConfig
 
 __all__ = [
+    "CheckpointConfig",
     "CommonConfig",
     "TrainingConfig",
     "SFTConfig",

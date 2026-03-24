@@ -1,22 +1,25 @@
 import json
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
 
-from nanochat import workspace
+from nanochat.checkpoint import CheckpointManager
 from nanochat.common import (
     WandbProtocol,
+    autodetect_backend,
     autodetect_device_type,
-    compute_init,
     get_compute_dtype,
     get_compute_dtype_reason,
     get_device_sync,
+    get_mlx_device_info,
     get_peak_flops,
     init_wandb,
+    mlx_compute_init,
     print0,
     print_banner,
+    torch_compute_init,
 )
 from nanochat.config import Config
 from nanochat.models.flash_attention import HAS_FA3, _use_fa3
@@ -28,7 +31,7 @@ from nanochat.training.base.schedulers import (
     base_weight_decay_scheduler,
 )
 from nanochat.training.base.state import PretrainingState
-from nanochat.training.checkpoint import load_checkpoint
+from nanochat.training.base.trainer import BaseTrainer, TorchTrainer
 from nanochat.training.dataloader import (
     tokenizing_distributed_data_loader_bos_bestfit,
     tokenizing_distributed_data_loader_with_state_bos_bestfit,
@@ -101,13 +104,9 @@ class BaseTrainingSetup:
         "ddp_world_size",
         "device",
         "master_process",
-        "orig_model",
-        "model",
+        "trainer",
         "tokenizer",
         "token_bytes",
-        "optimizer",
-        "scaler",
-        "train_loader",
         "build_val_loader",
         "ckpt_dir",
         "user_config",
@@ -119,7 +118,6 @@ class BaseTrainingSetup:
         "num_flops_per_token",
         "num_scaling_params",
         "gpu_peak_flops",
-        "grad_accum_steps",
         "get_lr_multiplier",
         "get_muon_momentum",
         "get_weight_decay",
@@ -138,13 +136,9 @@ class BaseTrainingSetup:
         ddp_world_size: int,
         device: torch.device,
         master_process: bool,
-        orig_model: GPT,
-        model: GPT,
+        trainer: BaseTrainer,
         tokenizer: object,
         token_bytes: object,
-        optimizer: object,
-        scaler: torch.amp.GradScaler | None,
-        train_loader: object,
         build_val_loader: Callable[[], object],
         ckpt_dir: str,
         user_config: dict[str, object],
@@ -156,7 +150,6 @@ class BaseTrainingSetup:
         num_flops_per_token: float,
         num_scaling_params: int,
         gpu_peak_flops: float,
-        grad_accum_steps: int,
         get_lr_multiplier: Callable[[int], float],
         get_muon_momentum: Callable[[int], float],
         get_weight_decay: Callable[[int], float],
@@ -172,13 +165,9 @@ class BaseTrainingSetup:
         self.ddp_world_size = ddp_world_size
         self.device = device
         self.master_process = master_process
-        self.orig_model = orig_model
-        self.model = model
+        self.trainer = trainer
         self.tokenizer = tokenizer
         self.token_bytes = token_bytes
-        self.optimizer = optimizer
-        self.scaler = scaler
-        self.train_loader = train_loader
         self.build_val_loader = build_val_loader
         self.ckpt_dir = ckpt_dir
         self.user_config = user_config
@@ -190,7 +179,6 @@ class BaseTrainingSetup:
         self.num_flops_per_token = num_flops_per_token
         self.num_scaling_params = num_scaling_params
         self.gpu_peak_flops = gpu_peak_flops
-        self.grad_accum_steps = grad_accum_steps
         self.get_lr_multiplier = get_lr_multiplier
         self.get_muon_momentum = get_muon_momentum
         self.get_weight_decay = get_weight_decay
@@ -201,12 +189,40 @@ class BaseTrainingSetup:
         self.resuming = resuming
 
 
-def setup(config: Config) -> BaseTrainingSetup:
-    """Initialize compute, model, optimizer, dataloaders and schedulers for base pretraining."""
-    print_banner()
+# ---------------------------------------------------------------------------
+# Backend-specific trainer construction
+# ---------------------------------------------------------------------------
 
-    device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
-    _, ddp_rank, _, ddp_world_size, device = compute_init(device_type)
+@dataclass(frozen=True)
+class _BackendSetup:
+    trainer: BaseTrainer
+    device_type: str
+    ddp_rank: int
+    ddp_world_size: int
+    device: torch.device  # torch device for the dataloader, not the compute device
+    synchronize: Callable[[], None]
+    get_max_memory: Callable[[], int]
+    gpu_peak_flops: float
+
+
+def _setup_torch(
+    config: Config,
+    checkpoint_manager: CheckpointManager,
+    meta_model: GPT,
+    model_config_kwargs: dict,
+    vocab_size: int,
+    weight_decay_scaled: float,
+    batch_lr_scale: float,
+    grad_accum_steps: int,
+    tokenizer: object,
+    resuming: bool,
+    resume_ckpt: object,
+    device_type: str,
+    ddp_rank: int,
+    ddp_world_size: int,
+    device: torch.device,
+) -> _BackendSetup:
+    """Build TorchTrainer."""
     synchronize, get_max_memory = get_device_sync(device_type)
 
     if device_type == "cuda":
@@ -216,10 +232,6 @@ def setup(config: Config) -> BaseTrainingSetup:
     else:
         gpu_peak_flops = float("inf")
     print0(f"COMPUTE_DTYPE: {get_compute_dtype()} ({get_compute_dtype_reason()})")
-
-    user_config = asdict(config)
-    master_process = ddp_rank == 0
-    wandb_run = init_wandb(user_config=user_config, master_process=master_process)
 
     if _use_fa3():
         print0("✓ Using Flash Attention 3 (Hopper GPU detected), efficient, new and awesome.")
@@ -241,11 +253,6 @@ def setup(config: Config) -> BaseTrainingSetup:
             )
         print0("!" * 80)
 
-    tokenizer = get_tokenizer()
-    token_bytes = get_token_bytes(device=device)
-    vocab_size = tokenizer.get_vocab_size()
-    print0(f"Vocab size: {vocab_size:,}")
-
     model = build_model_meta(
         config.training.depth,
         config.training.aspect_ratio,
@@ -254,25 +261,13 @@ def setup(config: Config) -> BaseTrainingSetup:
         config.training.window_pattern,
         vocab_size,
     )
-    model_config_kwargs = asdict(model.config)
-    print0(f"Model config:\n{json.dumps(model_config_kwargs, indent=2)}")
     model.to_empty(device=device)
     model.init_weights()
 
-    output_dirname = config.training.model_tag if config.training.model_tag else f"d{config.training.depth}"
-    ckpt_dir = workspace.checkpoint_dir("base", output_dirname)
-    config.save(Path(ckpt_dir) / "config.toml")
-
-    resuming = config.training.resume_from_step != -1
-    optimizer_data: dict[str, object] | None = None
-    meta_data: dict[str, object] | None = None
     if resuming:
-        print0(f"Resuming optimization from step {config.training.resume_from_step}")
-        model_data, optimizer_data, meta_data = load_checkpoint(
-            ckpt_dir, config.training.resume_from_step, device, load_optimizer=True, rank=ddp_rank
-        )
-        model.load_state_dict(model_data, strict=True, assign=True)
-        del model_data
+        assert resume_ckpt is not None
+        model.load_state_dict(resume_ckpt.model_state, strict=True, assign=True)
+        del resume_ckpt.model_state
 
     _convert_fp8(model, config, device_type)
 
@@ -282,12 +277,168 @@ def setup(config: Config) -> BaseTrainingSetup:
     else:
         print0("Skipping torch.compile on MPS (inductor backend not supported, causes NaN gradients)")
 
-    param_counts = model.num_scaling_params()
+    optimizer = model.setup_optimizer(
+        unembedding_lr=config.training.unembedding_lr * batch_lr_scale,
+        embedding_lr=config.training.embedding_lr * batch_lr_scale,
+        scalar_lr=config.training.scalar_lr * batch_lr_scale,
+        matrix_lr=config.training.matrix_lr * batch_lr_scale,
+        weight_decay=weight_decay_scaled,
+    )
+    if resuming:
+        assert resume_ckpt is not None
+        optimizer.load_state_dict(resume_ckpt.optimizer_state)
+        del resume_ckpt.optimizer_state
+
+    scaler = torch.amp.GradScaler(device=device_type) if get_compute_dtype() == torch.float16 else None
+    if scaler is not None:
+        print0("GradScaler enabled for fp16 training")
+
+    dataloader_resume_state_dict = None
+    if resuming:
+        assert resume_ckpt is not None
+        dataloader_resume_state_dict = resume_ckpt.metadata.dataloader_state_dict
+
+    train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
+        tokenizer,
+        config.training.device_batch_size,
+        config.training.max_seq_len,
+        split="train",
+        device=device,
+        resume_state_dict=dataloader_resume_state_dict,
+    )
+
+    trainer: BaseTrainer = TorchTrainer(
+        orig_model=orig_model,
+        model=model,
+        optimizer=optimizer,
+        scaler=scaler,
+        grad_accum_steps=grad_accum_steps,
+        device_type=device_type,
+        train_loader=train_loader,
+    )
+    return _BackendSetup(
+        trainer=trainer,
+        device_type=device_type,
+        ddp_rank=ddp_rank,
+        ddp_world_size=ddp_world_size,
+        device=device,
+        synchronize=synchronize,
+        get_max_memory=get_max_memory,
+        gpu_peak_flops=gpu_peak_flops,
+    )
+
+
+def _setup_mlx(
+    config: Config,
+    checkpoint_manager: CheckpointManager,
+    model_config_kwargs: dict,
+    vocab_size: int,
+    weight_decay_scaled: float,
+    batch_lr_scale: float,
+    grad_accum_steps: int,
+    tokenizer: object,
+    resuming: bool,
+    resume_ckpt: object,
+) -> _BackendSetup:
+    """Build MLXTrainer."""
+    from nanochat.models.mlx_gpt import GPT as MLXGPT
+    from nanochat.training.mlx_optimizer import MuonAdamW, build_param_groups
+    from nanochat.training.base.mlx_trainer import MLXTrainer
+    from nanochat.common import get_mlx_compute_dtype
+
+    mlx_compute_init()
+
+    info = get_mlx_device_info()
+    print0(f"MLX device: {info['device_name']} | RAM: {info['memory_size'] / 1024**3:.0f}GB | arch: {info['architecture']}")
+    print0("✓ MLX backend — single device, mx.compile, unified memory")
+
+    gpt_config = GPTConfig(**model_config_kwargs)
+    model = MLXGPT(gpt_config)
+
+    compute_dtype = get_mlx_compute_dtype()
+    print0(f"COMPUTE_DTYPE: {compute_dtype} (MLX)")
+    model.set_dtype(compute_dtype)
+
+    optimizer = MuonAdamW(build_param_groups(
+        model,
+        unembedding_lr=config.training.unembedding_lr * batch_lr_scale,
+        embedding_lr=config.training.embedding_lr * batch_lr_scale,
+        scalar_lr=config.training.scalar_lr * batch_lr_scale,
+        matrix_lr=config.training.matrix_lr * batch_lr_scale,
+        weight_decay=weight_decay_scaled,
+    ))
+
+    dataloader_resume_state_dict = None
+    if resuming:
+        assert resume_ckpt is not None
+        dataloader_resume_state_dict = resume_ckpt.metadata.dataloader_state_dict
+
+    train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
+        tokenizer,
+        config.training.device_batch_size,
+        config.training.max_seq_len,
+        split="train",
+        device=torch.device("cpu"),
+        resume_state_dict=dataloader_resume_state_dict,
+    )
+
+    trainer: BaseTrainer = MLXTrainer(model, optimizer, grad_accum_steps, train_loader)
+
+    if resuming:
+        assert resume_ckpt is not None
+        trainer.load_state_dicts(resume_ckpt.model_state, resume_ckpt.optimizer_state)
+        del resume_ckpt.model_state, resume_ckpt.optimizer_state
+        trainer.reprime()
+
+    synchronize, get_max_memory = get_device_sync("mlx")
+
+    return _BackendSetup(
+        trainer=trainer,
+        device_type="mlx",
+        ddp_rank=0,
+        ddp_world_size=1,
+        device=torch.device("cpu"),
+        synchronize=synchronize,
+        get_max_memory=get_max_memory,
+        gpu_peak_flops=float("inf"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def setup(config: Config, checkpoint_manager: CheckpointManager) -> BaseTrainingSetup:
+    """Initialize compute, model, optimizer, dataloaders and schedulers for base pretraining."""
+    print_banner()
+
+    backend = config.common.backend or autodetect_backend()
+
+    user_config = asdict(config)
+    wandb_run = init_wandb(user_config=user_config, master_process=True)
+
+    tokenizer = get_tokenizer()
+    vocab_size = tokenizer.get_vocab_size()
+    print0(f"Vocab size: {vocab_size:,}")
+
+    # Use torch meta model for param counting and scaling — framework-agnostic
+    meta_model = build_model_meta(
+        config.training.depth,
+        config.training.aspect_ratio,
+        config.training.head_dim,
+        config.training.max_seq_len,
+        config.training.window_pattern,
+        vocab_size,
+    )
+    model_config_kwargs = asdict(meta_model.config)
+    print0(f"Model config:\n{json.dumps(model_config_kwargs, indent=2)}")
+
+    param_counts = meta_model.num_scaling_params()
     print0("Parameter counts:")
     for key, value in param_counts.items():
         print0(f"{key:24s}: {value:,}")
     num_params = param_counts["total"]
-    num_flops_per_token = model.estimate_flops()
+    num_flops_per_token = meta_model.estimate_flops()
     print0(f"Estimated FLOPs per token: {num_flops_per_token:e}")
 
     d12_ref = build_model_meta(
@@ -302,7 +453,7 @@ def setup(config: Config) -> BaseTrainingSetup:
         target_param_data_ratio=config.training.target_param_data_ratio,
         total_batch_size_override=config.training.total_batch_size,
         weight_decay=config.training.weight_decay,
-        num_scaling_params=get_scaling_params(model),
+        num_scaling_params=get_scaling_params(meta_model),
         d12_scaling_params=get_scaling_params(d12_ref),
     )
     num_scaling_params = hp.num_scaling_params
@@ -318,38 +469,6 @@ def setup(config: Config) -> BaseTrainingSetup:
         print0(
             f"Scaling weight decay from {config.training.weight_decay:.6f} to {weight_decay_scaled:.6f} for depth {config.training.depth}"
         )
-
-    optimizer = model.setup_optimizer(
-        unembedding_lr=config.training.unembedding_lr * batch_lr_scale,
-        embedding_lr=config.training.embedding_lr * batch_lr_scale,
-        scalar_lr=config.training.scalar_lr * batch_lr_scale,
-        matrix_lr=config.training.matrix_lr * batch_lr_scale,
-        weight_decay=weight_decay_scaled,
-    )
-    if resuming:
-        optimizer.load_state_dict(optimizer_data)
-        del optimizer_data
-
-    scaler = torch.amp.GradScaler(device=device_type) if get_compute_dtype() == torch.float16 else None
-    if scaler is not None:
-        print0("GradScaler enabled for fp16 training")
-
-    dataloader_resume_state_dict = None
-    if resuming:
-        assert meta_data is not None
-        dataloader_resume_state_dict = meta_data["dataloader_state_dict"]
-
-    train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
-        tokenizer,
-        config.training.device_batch_size,
-        config.training.max_seq_len,
-        split="train",
-        device=device,
-        resume_state_dict=dataloader_resume_state_dict,
-    )
-    build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
-        tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
-    )
 
     assert (
         config.training.num_iterations > 0
@@ -374,13 +493,90 @@ def setup(config: Config) -> BaseTrainingSetup:
     print0(f"Total training FLOPs estimate: {num_flops_per_token * total_tokens:e}")
 
     tokens_per_fwdbwd = config.training.device_batch_size * config.training.max_seq_len
-    world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size
-    assert total_batch_size % world_tokens_per_fwdbwd == 0
+
+    # For the torch path we need ddp_world_size to compute grad_accum_steps correctly.
+    # Resolve it here before the backend dispatch so both paths share the same calculation.
+    if backend == "mlx":
+        ddp_world_size_for_accum = 1
+        _torch_device_type = ""
+        _torch_ddp_rank = 0
+        _torch_ddp_world_size = 1
+        _torch_device: torch.device = torch.device("cpu")
+    else:
+        _torch_device_type = autodetect_device_type() if config.common.device_type == "" else config.common.device_type
+        _, _torch_ddp_rank, _, _torch_ddp_world_size, _torch_device = torch_compute_init(_torch_device_type)
+        ddp_world_size_for_accum = _torch_ddp_world_size
+
+    world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size_for_accum
+    assert total_batch_size % world_tokens_per_fwdbwd == 0, (
+        f"total_batch_size {total_batch_size} not divisible by world_tokens_per_fwdbwd {world_tokens_per_fwdbwd}"
+    )
     grad_accum_steps = total_batch_size // world_tokens_per_fwdbwd
+
+    ckpt_dir = checkpoint_manager.checkpoint_dir
+    config.save(Path(ckpt_dir) / "config.toml")
+
+    resuming = config.checkpoint.resume_from_step != -1
+    resume_ckpt = None
+    if resuming:
+        print0(f"Resuming optimization from step {config.checkpoint.resume_from_step}")
+        resume_ckpt = checkpoint_manager.load(
+            config.checkpoint.resume_from_step,
+            torch.device("cpu"),
+            load_optimizer=True,
+            rank=0,
+        )
+
+    if backend == "mlx":
+        b = _setup_mlx(
+            config=config,
+            checkpoint_manager=checkpoint_manager,
+            model_config_kwargs=model_config_kwargs,
+            vocab_size=vocab_size,
+            weight_decay_scaled=weight_decay_scaled,
+            batch_lr_scale=batch_lr_scale,
+            grad_accum_steps=grad_accum_steps,
+            tokenizer=tokenizer,
+            resuming=resuming,
+            resume_ckpt=resume_ckpt,
+        )
+        token_bytes = get_token_bytes(device="cpu")
+        master_process = True
+    else:
+        b = _setup_torch(
+            config=config,
+            checkpoint_manager=checkpoint_manager,
+            meta_model=meta_model,
+            model_config_kwargs=model_config_kwargs,
+            vocab_size=vocab_size,
+            weight_decay_scaled=weight_decay_scaled,
+            batch_lr_scale=batch_lr_scale,
+            grad_accum_steps=grad_accum_steps,
+            tokenizer=tokenizer,
+            resuming=resuming,
+            resume_ckpt=resume_ckpt,
+            device_type=_torch_device_type,
+            ddp_rank=_torch_ddp_rank,
+            ddp_world_size=_torch_ddp_world_size,
+            device=_torch_device,
+        )
+        token_bytes = get_token_bytes(device=b.device)
+        master_process = b.ddp_rank == 0
+        # Re-init wandb with correct master_process now that ddp_rank is known
+        wandb_run = init_wandb(user_config=user_config, master_process=master_process)
+
+    trainer = b.trainer
+    device_type = b.device_type
+    ddp_rank = b.ddp_rank
+    ddp_world_size = b.ddp_world_size
+    device = b.device
+    synchronize = b.synchronize
+    get_max_memory = b.get_max_memory
+    gpu_peak_flops = b.gpu_peak_flops
+
     print0(
         f"Tokens / micro-batch / rank: {config.training.device_batch_size} x {config.training.max_seq_len} = {tokens_per_fwdbwd:,}"
     )
-    print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
     print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
 
     get_lr_multiplier = base_lr_scheduler(
@@ -392,8 +588,19 @@ def setup(config: Config) -> BaseTrainingSetup:
     if not resuming:
         state = PretrainingState.fresh()
     else:
-        assert meta_data is not None
-        state = PretrainingState.from_checkpoint(meta_data)
+        assert resume_ckpt is not None
+        state = PretrainingState.from_metadata(resume_ckpt.metadata)
+    state.model_config = model_config_kwargs
+    state.user_config = {
+        **user_config,
+        "device_batch_size": config.training.device_batch_size,
+        "max_seq_len": config.training.max_seq_len,
+        "total_batch_size": total_batch_size,
+    }
+
+    build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
+        tokenizer, config.training.device_batch_size, config.training.max_seq_len, split="val", device=device
+    )
 
     return BaseTrainingSetup(
         config=config,
@@ -402,13 +609,9 @@ def setup(config: Config) -> BaseTrainingSetup:
         ddp_world_size=ddp_world_size,
         device=device,
         master_process=master_process,
-        orig_model=orig_model,
-        model=model,
+        trainer=trainer,
         tokenizer=tokenizer,
         token_bytes=token_bytes,
-        optimizer=optimizer,
-        scaler=scaler,
-        train_loader=train_loader,
         build_val_loader=build_val_loader,
         ckpt_dir=ckpt_dir,
         user_config=user_config,
@@ -420,7 +623,6 @@ def setup(config: Config) -> BaseTrainingSetup:
         num_flops_per_token=num_flops_per_token,
         num_scaling_params=num_scaling_params,
         gpu_peak_flops=gpu_peak_flops,
-        grad_accum_steps=grad_accum_steps,
         get_lr_multiplier=get_lr_multiplier,
         get_muon_momentum=get_muon_momentum,
         get_weight_decay=get_weight_decay,

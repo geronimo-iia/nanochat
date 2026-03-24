@@ -3,10 +3,9 @@ from typing import cast
 import torch
 import torch.distributed as dist
 
-from nanochat import workspace
+from nanochat.checkpoint import make_checkpoint_manager
 from nanochat.common import print0
 from nanochat.report import get_report
-from nanochat.training.checkpoint import save_checkpoint
 from nanochat.training.rl.eval import run_gsm8k_eval
 from nanochat.training.rl.rollout import get_batch
 from nanochat.training.rl.setup import RLTrainingSetup
@@ -15,6 +14,7 @@ from nanochat.training.rl.setup import RLTrainingSetup
 def rl_train_loop(s: RLTrainingSetup) -> None:
     config = s.config
     state = s.state
+    checkpoint_manager = make_checkpoint_manager(s.ckpt_dir, config.checkpoint)
 
     batch_iterator = get_batch(
         state=state,
@@ -115,17 +115,11 @@ def rl_train_loop(s: RLTrainingSetup) -> None:
         s.wandb_run.log({"lrm": lrm}, step=step)
 
         # Checkpoint
-        if s.master_process and ((step > 0 and step % config.rl.save_every == 0) or step == s.num_steps - 1):
-            depth = s.model.config.n_layer
-            output_dirname = config.rl.model_tag if config.rl.model_tag else f"d{depth}"
-            ckpt_dir = workspace.checkpoint_dir("rl", output_dirname)
-            save_checkpoint(
-                ckpt_dir,
-                step,
-                s.model.state_dict(),
-                None,
-                state.to_checkpoint(s.model.config.__dict__),
-            )
-            print(f"✅ Saved model checkpoint to {ckpt_dir}")
+        if s.master_process and (
+            (step > 0 and config.checkpoint.save_every > 0 and step % config.checkpoint.save_every == 0)
+            or step == s.num_steps - 1
+        ):
+            checkpoint_manager.save(state, s.model.state_dict(), None)  # type: ignore[union-attr]
+            print(f"✅ Saved model checkpoint to {s.ckpt_dir}")
 
     get_report().log(section="Chat RL", data=[s.user_config])

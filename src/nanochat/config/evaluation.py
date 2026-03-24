@@ -1,10 +1,7 @@
 """Config for standalone model evaluation runs."""
 
-from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass
-from typing import Optional
 
 VALID_EVAL_MODES = frozenset({"core", "bpb", "sample"})
 
@@ -15,7 +12,6 @@ class EvaluationConfig:
     def update_parser(cls, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--modes", type=str, default=argparse.SUPPRESS, help="comma-separated: core,bpb,sample")
         parser.add_argument("--hf-path", type=str, default=argparse.SUPPRESS)
-        parser.add_argument("--model-tag", type=str, default=argparse.SUPPRESS)
         parser.add_argument("--step", type=int, default=argparse.SUPPRESS)
         parser.add_argument("--max-per-task", type=int, default=argparse.SUPPRESS, help="-1 = all")
         parser.add_argument("--device-batch-size", type=int, default=argparse.SUPPRESS)
@@ -26,7 +22,6 @@ class EvaluationConfig:
         return (
             'modes = "core,bpb,sample"  # comma-separated: core | bpb | sample\n'
             '# hf_path = ""             # HuggingFace model path (empty = use nanochat checkpoint)\n'
-            '# model_tag = ""           # empty = auto\n'
             "# step = -1                # -1 = last checkpoint\n"
             "max_per_task = -1          # -1 = all examples\n"
             "device_batch_size = 32\n"
@@ -38,10 +33,20 @@ class EvaluationConfig:
         if invalid:
             raise ValueError(f"Invalid eval modes: {invalid}. Valid: {VALID_EVAL_MODES}")
 
+    def validate(self) -> None:
+        """Raise ValueError if any field value is invalid."""
+        if self.max_per_task != -1 and self.max_per_task < 1:
+            raise ValueError(f"evaluation.max_per_task must be -1 or >= 1, got {self.max_per_task}")
+        if self.device_batch_size < 1:
+            raise ValueError(f"evaluation.device_batch_size must be >= 1, got {self.device_batch_size}")
+        if self.split_tokens < 1:
+            raise ValueError(f"evaluation.split_tokens must be >= 1, got {self.split_tokens}")
+        if self.step is not None and self.step < 0:
+            raise ValueError(f"evaluation.step must be >= 0 when set, got {self.step}")
+
     modes: str = "core,bpb,sample"
-    hf_path: Optional[str] = None
-    model_tag: Optional[str] = None
-    step: Optional[int] = None
+    hf_path: str | None = None
+    step: int | None = None
     max_per_task: int = -1
     device_batch_size: int = 32
     split_tokens: int = 40 * 524288

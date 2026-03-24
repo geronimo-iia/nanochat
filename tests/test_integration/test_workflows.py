@@ -28,24 +28,32 @@ def test_training_checkpoint_integration():
     """Test model save/load preserves weights."""
     import tempfile
 
-    from nanochat.training.checkpoint import load_checkpoint, save_checkpoint
+    from nanochat.checkpoint.factory import make_checkpoint_manager
+    from nanochat.checkpoint.protocol import CheckpointMetadata, LoopState
+    from nanochat.config.checkpoint import CheckpointConfig
+
+    class _State:
+        def __init__(self, step: int) -> None:
+            self.step = step
+
+        def to_metadata(self) -> CheckpointMetadata:
+            return CheckpointMetadata(
+                step=self.step,
+                model_config={},
+                user_config={},
+                loop_state=LoopState(min_val_bpb=0.0, smooth_train_loss=0.0, total_training_time=0.0),
+            )
 
     config = GPTConfig(vocab_size=256, n_layer=2, n_head=2, n_kv_head=2, n_embd=64)
     model = GPT(config)
     initial_weight = cast(Block, cast(torch.nn.ModuleList, model.transformer.h)[0]).attn.c_q.weight.clone()
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        save_checkpoint(
-            checkpoint_dir=tmpdir,
-            step=100,
-            model_data=model.state_dict(),
-            optimizer_data=None,
-            meta_data={"step": 100},
-            rank=0,
-        )
+        manager = make_checkpoint_manager(tmpdir, CheckpointConfig())
+        manager.save(_State(100), model.state_dict(), None, rank=0)
 
-        model_data, _, _ = load_checkpoint(tmpdir, step=100, device="cpu")
-        model.load_state_dict(model_data)
+        ckpt = manager.load(step=100, device=torch.device("cpu"))
+        model.load_state_dict(ckpt.model_state)
 
         restored_weight = cast(Block, cast(torch.nn.ModuleList, model.transformer.h)[0]).attn.c_q.weight
         assert torch.allclose(initial_weight, restored_weight)

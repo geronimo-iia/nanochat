@@ -1,7 +1,7 @@
-from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Self
 
-from dataclasses import dataclass
-from typing import Self
+from nanochat.checkpoint.protocol import CheckpointMetadata
 
 
 @dataclass
@@ -22,6 +22,8 @@ class SFTState:
     last_step: bool
     approx_progress: float
     current_epoch: int
+    model_config: dict[str, Any] = field(default_factory=dict)
+    user_config: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def fresh(cls) -> Self:
@@ -36,6 +38,30 @@ class SFTState:
             last_step=False,
             approx_progress=0.0,
             current_epoch=1,
+        )
+
+    def to_metadata(self) -> CheckpointMetadata:
+        return CheckpointMetadata(
+            step=self.step,
+            model_config=self.model_config,
+            user_config=self.user_config,
+            val_bpb=self.val_bpb,
+        )
+
+    @classmethod
+    def from_metadata(cls, meta: CheckpointMetadata) -> Self:
+        return cls(
+            step=meta.step,
+            val_bpb=meta.val_bpb,
+            min_val_bpb=float("inf"),
+            smooth_train_loss=0.0,
+            total_training_time=0.0,
+            progress=0.0,
+            last_step=False,
+            approx_progress=0.0,
+            current_epoch=1,
+            model_config=meta.model_config,
+            user_config=meta.user_config,
         )
 
     @classmethod

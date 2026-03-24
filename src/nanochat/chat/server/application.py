@@ -1,13 +1,13 @@
 """FastAPI app factory: lifespan, middleware, and router registration."""
 
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nanochat.chat.server.router import GenerationDefaults, build_router
 from nanochat.chat.server.worker_pool import WorkerPool
+from nanochat.config.checkpoint import CheckpointConfig
 
 
 def create_app(
@@ -17,8 +17,9 @@ def create_app(
     temperature: float,
     top_k: int,
     max_tokens: int,
-    model_tag: Optional[str],
-    step: Optional[int],
+    checkpoint_config: CheckpointConfig,
+    model_tag: str | None,
+    step: int | None,
     port: int,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
@@ -39,7 +40,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         print("Loading nanochat models across GPUs...")
         app.state.worker_pool = WorkerPool(device_type, num_gpus=num_gpus)
-        await app.state.worker_pool.initialize(source, model_tag=model_tag, step=step)
+        await app.state.worker_pool.initialize(source, config=checkpoint_config, model_tag=model_tag, step=step)
         print(f"Server ready at http://localhost:{port}")
         yield
 

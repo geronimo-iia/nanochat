@@ -1,5 +1,11 @@
 # nanochat
 
+> **A personal note — why I forked this project**
+>
+> I forked nanochat to learn. As a software engineer, I wanted to apply my existing skills in a new domain and start discovering data science and machine learning from the inside. This codebase felt like the perfect hands-on playground for that journey.
+>
+> I am deeply and sincerely grateful to [Andrej Karpathy](https://github.com/karpathy) for sharing his work openly with the community. His generosity in making this kind of high-quality, well-crafted project freely available is what makes learning like this possible. Thank you.
+
 ![nanochat logo](dev/nanochat.png)
 ![scaling laws](dev/scaling_laws_jan26.png)
 
@@ -55,7 +61,7 @@ A few more notes:
 - All code will run just fine on even a single GPU by omitting `torchrun`, and will produce ~identical results (code will automatically switch to gradient accumulation), but you'll have to wait 8 times longer.
 - If your GPU(s) have less than 80GB, you'll have to tune some of the hyperparameters or you will OOM / run out of VRAM. Look for `--device_batch_size` in the scripts and reduce it until things fit. E.g. from 32 (default) to 16, 8, 4, 2, or even 1. Less than that you'll have to know a bit more what you're doing and get more creative.
 - Most of the code is fairly vanilla PyTorch so it should run on anything that supports that - xpu, mps, or etc, but I haven't personally exercised all of these code paths so there might be sharp edges.
-- See [docs/data-layout.md](docs/data-layout.md) for where nanochat stores data, tokenizers, and checkpoints (`NANOCHAT_BASE_DIR`).
+- See [docs/design/data-layout.md](docs/design/data-layout.md) for where nanochat stores data, tokenizers, and checkpoints (`NANOCHAT_BASE_DIR`).
 
 ## Research
 
@@ -81,9 +87,9 @@ See an example [here](https://github.com/karpathy/nanochat/pull/498#issuecomment
 
 The important thing to note is that nanochat is written and configured around one single dial of complexity - the depth of the transformer. This single integer automatically determines all other hyperparameters (the width of the transformer, number of heads, learning rate adjustments, training horizons, weight decays, ...) so that the trained model comes out compute optimal. The idea is that the user doesn't have to think about or set any of this, they are simply asking for a smaller or bigger model using `--depth`, and everything "just works". By sweeping out the depth, you achieve the nanochat miniseries of compute optimal models at various sizes. GPT-2 capability model (which is of most interest at the moment) happens to be somewhere around d24-d26 range with the current code. But any candidate changes to the repo have to be principled enough that they work for all settings of depth.
 
-## Running on CPU / MPS
+## Running on CPU / Apple Silicon
 
-The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of running on CPU or Apple Silicon. It dramatically shrinks the LLM that is being trained to make things fit into a reasonable time interval of a few ten minutes of training. You will not get strong results in this way.
+The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of running on CPU or Apple Silicon. It dramatically shrinks the LLM that is being trained to make things fit into a reasonable time interval of a few ten minutes of training. You will not get strong results in this way. On Apple Silicon, MLX is autodetected and used by default — see [docs/guides/mlx-guide.md](docs/guides/mlx-guide.md) for batch size recommendations and backend selection.
 
 ## Precision / dtype
 
@@ -109,24 +115,10 @@ Note: `float16` training automatically enables a `GradScaler` in `base_train.py`
 
 ## Docs
 
-- [docs/guides/quickstart.md](docs/guides/quickstart.md) — first-time setup, data, tokenizer, training
-- [docs/guides/tuning-guide.md](docs/guides/tuning-guide.md) — parameter recommendations for tokenizer, pretraining, and SFT
-- [docs/configuration.md](docs/configuration.md) — config fields, TOML files, CLI overrides
-- [docs/data-layout.md](docs/data-layout.md) — where nanochat stores data, tokenizers, and checkpoints
-- [docs/code-structure.md](docs/code-structure.md) — package map and key cross-package flows
-- [docs/m3-max-guide.md](docs/m3-max-guide.md) — Apple Silicon (MPS) training guide
-- [docs/roadmap.md](docs/roadmap.md) — development roadmap and completed phases
+- [docs/guides/](docs/guides/README.md) — how-to guides: quickstart, tuning, Apple Silicon, miniseries
+- [docs/design/](docs/design/README.md) — architecture reference: code structure, configuration, trainer protocol, checkpoint interop, MLX backend
+- [docs/dev/](docs/dev/README.md) — active development: roadmap, benchmarks, phase plans
 - [CONTRIBUTING.md](CONTRIBUTING.md) — setup, testing, code quality, and commit conventions
-
-## Guides
-
-I've published a number of guides that might contain helpful information, most recent to least recent:
-
-- [Feb 1 2026: Beating GPT-2 for <<$100: the nanochat journey](docs/guides/beating-gpt2-nanochat-journey.md)
-- [Jan 7 miniseries v1](docs/guides/miniseries-v1.md) documents the first nanochat miniseries of models.
-- To add new abilities to nanochat, see [Guide: counting r in strawberry (and how to add abilities generally)](docs/guides/counting-letters-adding-abilities.md).
-- To customize your nanochat, see [Guide: infusing identity to your nanochat](docs/guides/infusing-identity.md), which describes how you can tune your nanochat's personality through synthetic data generation and mixing that data into the SFT stage.
-- [Oct 13 2025: original nanochat post](docs/guides/introducing-nanochat.md) introducing nanochat, though now it contains some deprecated information and the model is a lot older (with worse results) than current master.
 
 ## Contributing
 

@@ -27,10 +27,14 @@ class ConfigLoader:
         self._sections: set[str] = {"common"}
 
     def _add_section(self, name: str) -> ConfigLoader:
-        if self._sections - {"common"}:
+        non_common = self._sections - {"common", "checkpoint"}
+        if non_common and name != "checkpoint":
             raise RuntimeError("ConfigLoader only supports one section per instance")
         self._sections.add(name)
         return self
+
+    def add_checkpoint(self) -> ConfigLoader:
+        return self._add_section("checkpoint")
 
     def add_training(self) -> ConfigLoader:
         return self._add_section("training")
@@ -89,7 +93,7 @@ class ConfigLoader:
         for section in self._sections:
             cls = SECTION_CLS[section]
             valid = cls.__dataclass_fields__
-            merged = {**toml_data.get(section, {}), **{k: v for k, v in cli.items() if k in valid}}
+            merged = {**{k: v for k, v in toml_data.get(section, {}).items() if k in valid}, **{k: v for k, v in cli.items() if k in valid}}
             setattr(cfg, section, cls(**merged))
 
         if cfg.common.base_dir is None:

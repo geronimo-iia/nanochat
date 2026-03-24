@@ -115,15 +115,20 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
             doc_buffer.append(tokens)
 
     # Pre-allocate buffers once: layout is [inputs (B*T) | targets (B*T)]
-    # This gives us contiguous views and a single HtoD transfer
+    # CUDA: pinned cpu_buffer → async DMA into persistent gpu_buffer (single HtoD transfer)
+    # CPU/MLX: yield cpu_buffer views directly — no gpu_buffer needed
     use_cuda = getattr(device, "type", device) == "cuda"
-    row_buffer = torch.empty((B, row_capacity), dtype=torch.long)  # for building rows without creating Python lists
-    cpu_buffer = torch.empty(2 * B * T, dtype=torch.long, pin_memory=use_cuda)  # staging area (CPU)
-    gpu_buffer = torch.empty(2 * B * T, dtype=torch.long, device=device)  # on-device buffer
-    cpu_inputs = cpu_buffer[: B * T].view(B, T)  # a few views into these buffers just for convenience
+    row_buffer = torch.empty((B, row_capacity), dtype=torch.long)
+    cpu_buffer = torch.empty(2 * B * T, dtype=torch.long, pin_memory=use_cuda)
+    cpu_inputs = cpu_buffer[: B * T].view(B, T)
     cpu_targets = cpu_buffer[B * T :].view(B, T)
-    inputs = gpu_buffer[: B * T].view(B, T)
-    targets = gpu_buffer[B * T :].view(B, T)
+    if use_cuda:
+        gpu_buffer = torch.empty(2 * B * T, dtype=torch.long, device=device)
+        inputs = gpu_buffer[: B * T].view(B, T)
+        targets = gpu_buffer[B * T :].view(B, T)
+    else:
+        inputs = cpu_inputs
+        targets = cpu_targets
 
     while True:
         for row_idx in range(B):
@@ -156,14 +161,17 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
                     row_buffer[row_idx, pos : pos + remaining] = torch.tensor(doc[:remaining], dtype=torch.long)
                     pos += remaining
 
-        # Copy to pinned CPU buffer, then single HtoD transfer
+        # copy 1: row_buffer → cpu_buffer (necessary — flattens 2D rows into contiguous 1D layout)
         cpu_inputs.copy_(row_buffer[:, :-1])
         cpu_targets.copy_(row_buffer[:, 1:])
 
         state_dict = {"pq_idx": pq_idx, "rg_idx": rg_idx, "epoch": epoch}
 
-        # Single HtoD copy into persistent GPU buffer and yield
-        gpu_buffer.copy_(cpu_buffer, non_blocking=use_cuda)
+        # copy 2 (CUDA only): cpu_buffer → gpu_buffer via async DMA engine
+        # pinned memory + non_blocking lets this overlap with the previous step's compute
+        # on MLX there is no DMA engine — cpu_buffer views are yielded directly
+        if use_cuda:
+            gpu_buffer.copy_(cpu_buffer, non_blocking=True)
         yield inputs, targets, state_dict
 
 
