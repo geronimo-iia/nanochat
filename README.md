@@ -1,5 +1,11 @@
 # nanochat
 
+> **A personal note — why I forked this project**
+>
+> I forked nanochat to learn. As a software engineer, I wanted to apply my existing skills in a new domain and start discovering data science and machine learning from the inside. This codebase felt like the perfect hands-on playground for that journey.
+>
+> I am deeply and sincerely grateful to [Andrej Karpathy](https://github.com/karpathy) for sharing his work openly with the community. His generosity in making this kind of high-quality, well-crafted project freely available is what makes learning like this possible. Thank you.
+
 ![nanochat logo](dev/nanochat.png)
 ![scaling laws](dev/scaling_laws_jan26.png)
 
