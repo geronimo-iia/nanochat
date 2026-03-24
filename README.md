@@ -60,7 +60,7 @@ A few more notes:
 - The code will run just fine on the Ampere 8XA100 GPU node as well, but a bit slower.
 - All code will run just fine on even a single GPU by omitting `torchrun`, and will produce ~identical results (code will automatically switch to gradient accumulation), but you'll have to wait 8 times longer.
 - If your GPU(s) have less than 80GB, you'll have to tune some of the hyperparameters or you will OOM / run out of VRAM. Look for `--device_batch_size` in the scripts and reduce it until things fit. E.g. from 32 (default) to 16, 8, 4, 2, or even 1. Less than that you'll have to know a bit more what you're doing and get more creative.
-- Most of the code is fairly vanilla PyTorch so it should run on anything that supports that - xpu, mps, or etc, but I haven't personally exercised all of these code paths so there might be sharp edges.
+- Most of the code is fairly vanilla PyTorch so it should run on anything that supports that - xpu, mps, etc. On Apple Silicon, the MLX backend is autodetected and used by default (see below); PyTorch MPS is available as a fallback by setting `NANOCHAT_BACKEND=pytorch`.
 - See [docs/design/data-layout.md](docs/design/data-layout.md) for where nanochat stores data, tokenizers, and checkpoints (`NANOCHAT_BASE_DIR`).
 
 ## Research
@@ -89,18 +89,39 @@ The important thing to note is that nanochat is written and configured around on
 
 ## Running on CPU / Apple Silicon
 
-The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of running on CPU or Apple Silicon. It dramatically shrinks the LLM that is being trained to make things fit into a reasonable time interval of a few ten minutes of training. You will not get strong results in this way. On Apple Silicon, MLX is autodetected and used by default — see [docs/guides/mlx-guide.md](docs/guides/mlx-guide.md) for batch size recommendations and backend selection.
+The script [runs/runcpu.sh](runs/runcpu.sh) shows a very simple example of running on CPU or Apple Silicon. It dramatically shrinks the LLM that is being trained to make things fit into a reasonable time interval of a few ten minutes of training. You will not get strong results in this way.
+
+### MLX backend (default on Apple Silicon)
+
+On Apple Silicon (M-series Macs), nanochat automatically uses the [MLX](https://github.com/ml-explore/mlx) backend instead of PyTorch. MLX is a Apple-native array framework that runs efficiently on the unified memory architecture of Apple Silicon chips.
+
+Key characteristics of the MLX backend:
+
+- **Throughput**: ~45k tokens/sec during pretraining on Apple Silicon (M-series)
+- **Optimizer**: Muon (for transformer block weights) + AdamW (for embeddings, lm_head, scalars), matching the CUDA training setup
+- **Dtype**: `bfloat16` compute by default — avoids the precision issues of `float16` on MPS
+- **Lazy evaluation**: MLX uses lazy computation graphs; `mx.eval()` is called explicitly at each step
+- **No gradient scaler**: unlike `float16` on PyTorch MPS, `bfloat16` in MLX does not require a GradScaler
+
+To force the PyTorch backend (e.g. to use MPS explicitly):
+
+```bash
+NANOCHAT_BACKEND=pytorch nanochat train base -- --depth=4
+```
+
+See [docs/guides/mlx-guide.md](docs/guides/mlx-guide.md) for batch size recommendations and further backend details.
 
 ## Precision / dtype
 
 nanochat does not use `torch.amp.autocast`. Instead, precision is managed explicitly through a single global `COMPUTE_DTYPE` (defined in `nanochat/common/dtype.py`). By default this is auto-detected based on your hardware:
 
-| Hardware                      | Default dtype | Why                                                                    |
-| ----------------------------- | ------------- | ---------------------------------------------------------------------- |
-| CUDA SM 80+ (A100, H100, ...) | `bfloat16`    | Native bf16 tensor cores                                               |
-| CUDA SM < 80 (V100, T4, ...)  | `float32`     | No bf16; fp16 available via `NANOCHAT_DTYPE=float16` (uses GradScaler) |
-| MPS (Apple Silicon)           | `float16`     | fp16 tensor cores; GradScaler enabled automatically                    |
-| CPU                           | `float32`     | No reduced-precision tensor cores                                      |
+| Hardware                      | Backend    | Default dtype | Why                                                                    |
+| ----------------------------- | ---------- | ------------- | ---------------------------------------------------------------------- |
+| CUDA SM 80+ (A100, H100, ...) | PyTorch    | `bfloat16`    | Native bf16 tensor cores                                               |
+| CUDA SM < 80 (V100, T4, ...)  | PyTorch    | `float32`     | No bf16; fp16 available via `NANOCHAT_DTYPE=float16` (uses GradScaler) |
+| Apple Silicon (M-series)      | **MLX**    | `bfloat16`    | Default on Darwin; MLX bf16 is stable and fast (~45k tok/sec)          |
+| Apple Silicon (fallback)      | PyTorch MPS| `float16`     | Set `NANOCHAT_BACKEND=pytorch`; GradScaler enabled automatically       |
+| CPU                           | PyTorch    | `float32`     | No reduced-precision tensor cores                                      |
 
 You can override the default with the `NANOCHAT_DTYPE` environment variable:
 

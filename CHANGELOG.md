@@ -1,69 +1,82 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+See `dev/LOG.md` for detailed experiment notes and `dev/LEADERBOARD.md` for the GPT-2 speedrun leaderboard.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+---
 
-## [Unreleased]
+## 2026-03 — MLX training stack; codebase restructure (fork work)
 
-### Added
+Complete Apple Silicon training pipeline and a major codebase restructure on top of the upstream fork.
 
-- Unified `nanochat` CLI — single entry point for all commands:
-  - `nanochat config init / show`
-  - `nanochat data download / tokenizer train / tokenizer eval`
-  - `nanochat train base / sft / rl`
-  - `nanochat eval base / chat`
-  - `nanochat chat / serve`
-  - `nanochat report generate / reset`
-- `config.toml` support — auto-discovered from working directory; CLI args override file values
-- `--base-dir` flag and `NANOCHAT_BASE_DIR` env var to set the data/checkpoint root
-- Flash Attention 3 with automatic fallback to PyTorch SDPA on non-Hopper GPUs
-- FP8 training via `torchao` (H100 only, opt-in with `--fp8`)
-- Learnable per-layer residual scalars (`resid_lambdas`, `x0_lambdas`)
-- Sliding window attention with configurable patterns (default `SSSL`: 3 short, 1 long)
-- BOS-aligned dataloaders with BestFit-Crop packing and epoch tracking
-- Pretraining resumption from checkpoints (`--resume-from-step`)
-- `--save-every` flag for checkpoint cadence control
-- Muon optimizer with Polar Express orthogonalization and Adafactor-style variance reduction
-- Cautious weight decay with linear schedule to zero
-- SpellingBee task for character counting and spelling ability
-- Python calculator tool support in the inference engine
-- Identity/personality system via synthetic data generation (`dev/gen_synthetic_data.py`)
-- Web UI: slash commands, click-to-edit messages, click-to-regenerate responses
-- Multi-GPU inference (data parallel)
-- CPU and MPS (Apple Silicon) support with automatic device detection
-- CORE score evaluation for HuggingFace models
-- Miniseries and scaling laws training scripts (`runs/miniseries.sh`, `runs/scaling_laws.sh`)
+### MLX backend (pretraining → SFT → RL)
 
-### Changed
+- Full SFT and RL training on Apple Silicon via MLX — iterate without cloud costs after a one-time H100 pretrain (~$70)
+- `MLXTrainer`, `MLXRLTrainer`, `MLXEngine` (KV-cache generation), `mlx_rl_loop`
+- SFT and RL loops share the same `BaseTrainer` protocol as the PyTorch path
+- Fixed Muon NaN at step ~25: Polar Express must run in float32, not bfloat16
+- Removed `_clip_grads` sync barrier: ~22k → ~45k tok/sec on M3 Max
 
-- Switched pretraining dataset from FineWeb-EDU to NVIDIA ClimbMix — time to GPT-2 reduced from 2.76h to 1.80h
-- Vocab size default: 50K → 32K
-- D:N ratio: 20 → 8 (compute-optimal for nanochat)
-- Warmdown ratio: 0.2 → 0.4
-- Embedding learning rate: 0.2 → 0.3
-- Adam beta1: 0.8 → 0.96
-- MPS backend uses `float16` instead of `float32` (~10–30% faster, halves memory)
-- Upgraded to PyTorch 2.9.1
+### Codebase restructure
 
-### Removed
+- Unified `nanochat` CLI replacing scattered scripts; `config.toml` support; `NANOCHAT_BASE_DIR`
+- `workspace.py` — single source of truth for all filesystem paths
+- `config/` — typed `Config` dataclass hierarchy with TOML loading and CLI overrides
+- `checkpoint/` — `CheckpointManager` protocol; safetensors format; numpy conversion boundary for cross-backend weight exchange
+- `BaseTrainer` protocol — shared by PyTorch and MLX; `model_state_dict()`, `step()`, `eval_context()`
+- `model_factory.py` — shared model construction/loading across training, eval, and chat
+- `LocalWandb` — offline metric logging to JSONL, no external dependency
+- `torch.compile` disabled on MPS (caused NaN gradients)
 
-- Midtraining as a separate stage — replaced by BOS-aligned dataloader + `chat_sft`
-- Gradient clipping — not necessary, costs 2% MFU
+### Documentation
 
-### Fixed
+- `docs/design/` — architecture reference: code structure, configuration, data layout, checkpoint interop, trainer protocol, MLX backend
+- `docs/guides/` — quickstart, tuning guide, MLX guide, miniseries, identity/SFT, upstream integration workflow
+- `docs/dev/` — roadmap, MLX SFT/RL design plan, per-task specs
 
-- Grad clip bug — was clipping per GPU before gradient synchronization
-- Completion-only loss masking in SFT dataloader
-- KV-cache decode respecting sliding window
-- Distributed Parquet dataloader resume for multi-epoch training
-- Tok/sec calculation when `grad_accum_steps > 1`
-- Memory leak in Rust tokenizer
-- CPU bfloat16 tensor loading
-- Learning rate multiplier ramping direction
-- Missing `val_bpb` on resume
-- `torch.compile` skipped on MPS — caused NaN gradients during gradient accumulation
+---
 
-### Security
+## 2026-01-10 to 2026-03-04 — Architecture experiments (upstream)
 
-- Hardened eval: calculator tool blocked from accessing globals/locals
+Key results from the GPT-2 speedrun. See `dev/LOG.md` for full details.
+
+- **ClimbMix dataset** (Mar 4): FineWeb-EDU → NVIDIA ClimbMix 400B — speedrun 2h 46m → 2h 01m; model depth d26 → d24
+- **Explicit dtype management** (Mar 4): removed `torch.amp.autocast`; single `COMPUTE_DTYPE` global; fp16 + GradScaler path
+- **Logit softcap** (Mar 2): `20 * tanh(x/20)` — small but consistent val loss improvement
+- **FP8 training** (Feb 2): `torchao Float8Linear`, H100 only, opt-in `--fp8`
+- **Value embeddings** (Jan 28): alternating-layer token→KV embeddings — +600M params at near-zero FLOP cost
+- **GQA** (Jan 28): `n_kv_head` independent of `n_head`
+- **BOS-aligned dataloader** (Jan 13): BestFit-Crop packing; replaces midtraining as separate stage
+- **Flash Attention 3** (Jan 11): auto-fallback to PyTorch SDPA on non-Hopper GPUs
+- **Sliding window** (Jan 11): configurable `SSSL` pattern (3 short + 1 full context, tiled)
+- **Per-layer residual scalars** (Jan 11): `resid_lambdas`, `x0_lambdas`, smear gate
+- **Muon optimizer** (Jan 10): Nesterov + Polar Express orthogonalization; cautious weight decay; gradient clipping removed
+
+---
+
+## 2025-10-13 to 2026-01-06 — Baseline (upstream)
+
+Fork of `karpathy/nanochat` at initial public release. Upstream contributions in this period:
+
+- Pretraining checkpoint resumption (`--save-every` + `--resume-from-step`)
+- CPU and MPS backends; bf16 load fix on MPS
+- SpellingBee eval task; calculator tool hardened against code injection
+- Identity/personality synthetic data system
+- `rustbpe` extracted to its own PyPI package
+- Hyperparameter tuning: `warmdown_ratio` 0.2 → 0.4, `embedding_lr` 0.2 → 0.3
+- Various bug fixes: dataloader resume, KV-cache GQA shape, tok/sec calculation, val_bpb on resume
+
+---
+
+## Tried and rejected (do not re-add without new evidence)
+
+| Feature | Reason |
+|---|---|
+| Mixture of Experts | Wall-clock negative at d18 — dispatch overhead > FLOP savings |
+| SwiGLU | Worse than ReLU² |
+| Vanilla FineWeb / FineWeb-EDU mixtures | No improvement or regression on CORE |
+| MuonH / Hyperball | No improvement over Polar Express |
+| Bigram hash embeddings | Neutral-to-negative at d25+ |
+| Multi-token prediction (MTP) | Memory overhead, negative CORE |
+| Varlen attention | Negative result |
+| Gradient clipping | Always inactive, 2% MFU overhead |
+| Olmo pretraining mix | Negative result |
